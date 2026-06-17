@@ -159,7 +159,8 @@ if(APPLE)
     add_custom_command(TARGET DropAndDrag POST_BUILD
         COMMAND mkdir -p "$<TARGET_BUNDLE_CONTENT_DIR:DropAndDrag>/Resources"
         COMMAND cp "${CMAKE_CURRENT_SOURCE_DIR}/resources/icons/icon.icns" "$<TARGET_BUNDLE_CONTENT_DIR:DropAndDrag>/Resources/icon.icns"
-        COMMENT "Copying app icon"
+        COMMAND codesign --force --deep --sign - "$<TARGET_BUNDLE_DIR:DropAndDrag>"
+        COMMENT "Copying app icon + ad-hoc signing"
     )
 elseif(WIN32)
     target_link_libraries(DropAndDragPlatform PRIVATE

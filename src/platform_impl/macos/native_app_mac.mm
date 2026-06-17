@@ -11,9 +11,24 @@
     (void)n;
     [NSApp activateIgnoringOtherApps:YES];
 }
+- (void)applicationWillFinishLaunching:(NSNotification*)n {
+    (void)n;
+    NSAppleEventManager* em = [NSAppleEventManager sharedAppleEventManager];
+    [em setEventHandler:self
+        andSelector:@selector(handleGetURLEvent:withReplyEvent:)
+        forEventClass:kInternetEventClass
+        andEventID:kAEGetURL];
+}
+- (void)handleGetURLEvent:(NSAppleEventDescriptor*)event
+           withReplyEvent:(NSAppleEventDescriptor*)reply {
+    (void)event; (void)reply;
+}
 - (BOOL)applicationShouldTerminateAfterLastWindowClosed:(NSApplication*)s {
     (void)s;
     return NO;
+}
+- (void)application:(NSApplication*)app openURLs:(NSArray<NSURL*>*)urls {
+    (void)app; (void)urls;
 }
 @end
 
