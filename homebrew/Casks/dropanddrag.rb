@@ -1,6 +1,6 @@
 cask "dropanddrag" do
-  version "1.0.0"
-  sha256 arm:   "f5cd9d85135fa3cc59044b628a55b11e4331362fcb107a8593d41f80d1ca2ddb",
+  version "1.0.1"
+  sha256 arm:   "10409b01dda56629819e9eafb09f9e4472d93f5bb0a33e4bd2889514f20fed4f",
          intel: "PLACEHOLDER_X64_SHA256"
 
   url "https://github.com/tigr322/DropAndDrag/releases/download/v#{version}/DropAndDrag-#{version}-macOS.dmg"

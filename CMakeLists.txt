@@ -156,6 +156,11 @@ if(APPLE)
         MACOSX_BUNDLE_SHORT_VERSION_STRING "${PROJECT_VERSION}"
         XCODE_ATTRIBUTE_CODE_SIGN_IDENTITY ""
     )
+    add_custom_command(TARGET DropAndDrag POST_BUILD
+        COMMAND mkdir -p "$<TARGET_BUNDLE_CONTENT_DIR:DropAndDrag>/Resources"
+        COMMAND cp "${CMAKE_CURRENT_SOURCE_DIR}/resources/icons/icon.icns" "$<TARGET_BUNDLE_CONTENT_DIR:DropAndDrag>/Resources/icon.icns"
+        COMMENT "Copying app icon"
+    )
 elseif(WIN32)
     target_link_libraries(DropAndDragPlatform PRIVATE
         dwmapi
