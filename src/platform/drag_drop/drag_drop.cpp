@@ -43,7 +43,7 @@ void DragDropManager::onDragLeave() {
     }
 }
 
-std::vector<ItemData> DragDropManager::onDrop() {
+std::vector<DropItemData> DragDropManager::onDrop() {
     if (drop_cb_) {
         return {};
     }

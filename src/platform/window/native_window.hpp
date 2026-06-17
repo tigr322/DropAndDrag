@@ -33,10 +33,10 @@ using ResizeCallback = std::function<void(int width, int height)>;
 using MouseCallback = std::function<void(int x, int y, MouseButton button)>;
 using MouseMoveCallback = std::function<void(int x, int y)>;
 using KeyCallback = std::function<void(int key_code, int modifiers)>;
-using DragEnterCallback = std::function<void(int x, int y)>;
-using DragOverCallback = std::function<void(int x, int y)>;
-using DragLeaveCallback = std::function<void()>;
-using DropCallback = std::function<void(int x, int y)>;
+using WindowDragEnterCallback = std::function<void(int x, int y)>;
+using WindowDragOverCallback  = std::function<void(int x, int y)>;
+using WindowDragLeaveCallback = std::function<void()>;
+using WindowDropCallback      = std::function<void(int x, int y)>;
 using CloseCallback = std::function<void()>;
 
 class NativeWindow {
@@ -63,10 +63,10 @@ public:
     virtual void setMouseUpCallback(MouseCallback cb) = 0;
     virtual void setKeyDownCallback(KeyCallback cb) = 0;
     virtual void setKeyUpCallback(KeyCallback cb) = 0;
-    virtual void setDragEnterCallback(DragEnterCallback cb) = 0;
-    virtual void setDragOverCallback(DragOverCallback cb) = 0;
-    virtual void setDragLeaveCallback(DragLeaveCallback cb) = 0;
-    virtual void setDropCallback(DropCallback cb) = 0;
+    virtual void setDragEnterCallback(WindowDragEnterCallback cb) = 0;
+    virtual void setDragOverCallback(WindowDragOverCallback cb) = 0;
+    virtual void setDragLeaveCallback(WindowDragLeaveCallback cb) = 0;
+    virtual void setDropCallback(WindowDropCallback cb) = 0;
     virtual void setCloseCallback(CloseCallback cb) = 0;
 
     static std::unique_ptr<NativeWindow> create(WindowStyle style);

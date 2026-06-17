@@ -1,13 +1,20 @@
 #include "item_store.hpp"
 
-#include <algorithm>
+#include <mutex>
 #include <shared_mutex>
 
 namespace dd {
 
-ItemStore& ItemStore::instance() {
+IItemStore* ItemStore::s_override_ = nullptr;
+
+IItemStore& ItemStore::instance() {
+    if (s_override_) return *s_override_;
     static ItemStore store;
     return store;
+}
+
+void ItemStore::set_instance_for_test(IItemStore* p) noexcept {
+    s_override_ = p;
 }
 
 std::string ItemStore::add(Item item) {
@@ -23,10 +30,7 @@ std::string ItemStore::add(Item item) {
 std::optional<Item> ItemStore::get(std::string_view uuid) const {
     std::shared_lock lock(mutex_);
     auto it = items_.find(std::string(uuid));
-    if (it != items_.end()) {
-        return it->second;
-    }
-    return std::nullopt;
+    return it != items_.end() ? std::optional<Item>{it->second} : std::nullopt;
 }
 
 std::vector<Item> ItemStore::getAll() const {

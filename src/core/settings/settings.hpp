@@ -85,8 +85,9 @@ public:
     [[nodiscard]] bool enable_shake_to_open() const;
     void set_enable_shake_to_open(bool value);
 
-private:
     Settings() = default;
+
+private:
 
     mutable std::shared_mutex mutex_;
     SettingsData data_;

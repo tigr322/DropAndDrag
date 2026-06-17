@@ -2,8 +2,9 @@
 
 #include <core/event_bus/event_bus.hpp>
 
-#include <nlohmann/json.hpp>
+#include <vendor/nlohmann/json.hpp>
 
+#include <any>
 #include <atomic>
 #include <string>
 
@@ -14,10 +15,11 @@ TEST_CASE("EventBus subscribe and emit") {
 
     bool received = false;
     auto token = bus.subscribe(EventType::ItemAdded, [&received](const Event& e) {
+        (void)e;
         received = true;
     });
 
-    bus.emit(EventType::ItemAdded, {{"uuid", "test-1"}});
+    bus.emit(EventType::ItemAdded, std::any(nlohmann::json{{"uuid", "test-1"}}));
 
     ASSERT_TRUE(received);
     bus.unsubscribe(token);
@@ -32,7 +34,7 @@ TEST_CASE("EventBus multiple subscribers") {
     auto t2 = bus.subscribe(EventType::ItemRemoved, [&count](const Event&) { count.fetch_add(1); });
     auto t3 = bus.subscribe(EventType::ItemRemoved, [&count](const Event&) { count.fetch_add(1); });
 
-    bus.emit(EventType::ItemRemoved, {{"uuid", "removed-1"}});
+    bus.emit(EventType::ItemRemoved, std::any(nlohmann::json{{"uuid", "removed-1"}}));
 
     ASSERT_EQ(count.load(), 3);
 
@@ -66,12 +68,12 @@ TEST_CASE("EventBus different event types") {
     auto t1 = bus.subscribe(EventType::ItemAdded, [&](const Event&) { item_added = true; });
     auto t2 = bus.subscribe(EventType::ItemRemoved, [&](const Event&) { item_removed = true; });
 
-    bus.emit(EventType::ItemAdded, {{"uuid", "a"}});
+    bus.emit(EventType::ItemAdded, std::any(nlohmann::json{{"uuid", "a"}}));
 
     ASSERT_TRUE(item_added);
     ASSERT_FALSE(item_removed);
 
-    bus.emit(EventType::ItemRemoved, {{"uuid", "b"}});
+    bus.emit(EventType::ItemRemoved, std::any(nlohmann::json{{"uuid", "b"}}));
 
     ASSERT_TRUE(item_added);
     ASSERT_TRUE(item_removed);
@@ -80,18 +82,21 @@ TEST_CASE("EventBus different event types") {
     bus.unsubscribe(t2);
 }
 
-TEST_CASE("EventBus event data") {
+TEST_CASE("EventBus event data via std::any") {
     auto& bus = EventBus::instance();
 
     std::string received_uuid;
     std::string received_name;
 
     auto token = bus.subscribe(EventType::ItemUpdated, [&](const Event& e) {
-        if (e.data.contains("uuid")) {
-            received_uuid = e.data["uuid"].get<std::string>();
-        }
-        if (e.data.contains("name")) {
-            received_name = e.data["name"].get<std::string>();
+        if (e.data.has_value()) {
+            auto j = std::any_cast<nlohmann::json>(e.data);
+            if (j.contains("uuid")) {
+                received_uuid = j["uuid"].get<std::string>();
+            }
+            if (j.contains("name")) {
+                received_name = j["name"].get<std::string>();
+            }
         }
     });
 
@@ -100,7 +105,7 @@ TEST_CASE("EventBus event data") {
     data["name"] = "Test Item";
     data["index"] = 42;
 
-    bus.emit(EventType::ItemUpdated, data);
+    bus.emit(EventType::ItemUpdated, std::any(data));
 
     ASSERT_EQ(received_uuid, "item-abc");
     ASSERT_EQ(received_name, "Test Item");
@@ -123,7 +128,7 @@ TEST_CASE("EventBus unsubscribe during emission") {
         called.fetch_add(1);
     });
 
-    bus.emit(EventType::ThemeChanged, {{"theme", "dark"}});
+    bus.emit(EventType::ThemeChanged, std::any(nlohmann::json{{"theme", "dark"}}));
 
     ASSERT_GE(called.load(), 1);
 
@@ -136,8 +141,7 @@ TEST_CASE("EventBus emit without data") {
     bool called = false;
     auto token = bus.subscribe(EventType::ShelfHidden, [&](const Event& e) {
         called = true;
-        ASSERT_TRUE(e.data.is_object());
-        ASSERT_TRUE(e.data.empty());
+        ASSERT_FALSE(e.data.has_value());
     });
 
     bus.emit(EventType::ShelfHidden);

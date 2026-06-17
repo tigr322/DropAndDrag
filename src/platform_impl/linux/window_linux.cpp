@@ -315,10 +315,10 @@ public:
     void setMouseUpCallback(MouseCallback cb) override { mouse_up_callback_ = std::move(cb); }
     void setKeyDownCallback(KeyCallback cb) override { key_down_callback_ = std::move(cb); }
     void setKeyUpCallback(KeyCallback cb) override { key_up_callback_ = std::move(cb); }
-    void setDragEnterCallback(DragEnterCallback cb) override { drag_enter_callback_ = std::move(cb); }
-    void setDragOverCallback(DragOverCallback cb) override { drag_over_callback_ = std::move(cb); }
-    void setDragLeaveCallback(DragLeaveCallback cb) override { drag_leave_callback_ = std::move(cb); }
-    void setDropCallback(DropCallback cb) override { drop_callback_ = std::move(cb); }
+    void setDragEnterCallback(WindowDragEnterCallback cb) override { drag_enter_callback_ = std::move(cb); }
+    void setDragOverCallback(WindowDragOverCallback cb) override { drag_over_callback_ = std::move(cb); }
+    void setDragLeaveCallback(WindowDragLeaveCallback cb) override { drag_leave_callback_ = std::move(cb); }
+    void setDropCallback(WindowDropCallback cb) override { drop_callback_ = std::move(cb); }
     void setCloseCallback(CloseCallback cb) override { close_callback_ = std::move(cb); }
 
     ::Window x11Window() const { return window_; }
@@ -443,10 +443,10 @@ private:
     MouseCallback mouse_up_callback_;
     KeyCallback key_down_callback_;
     KeyCallback key_up_callback_;
-    DragEnterCallback drag_enter_callback_;
-    DragOverCallback drag_over_callback_;
-    DragLeaveCallback drag_leave_callback_;
-    DropCallback drop_callback_;
+    WindowDragEnterCallback drag_enter_callback_;
+    WindowDragOverCallback drag_over_callback_;
+    WindowDragLeaveCallback drag_leave_callback_;
+    WindowDropCallback drop_callback_;
     CloseCallback close_callback_;
 };
 

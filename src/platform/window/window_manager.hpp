@@ -65,7 +65,8 @@ public:
 
     float getShelfOpacity() const;
 
-private:
+public: // was private
+    
     WindowManager();
     ~WindowManager();
 

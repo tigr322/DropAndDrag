@@ -170,10 +170,10 @@ public:
     void setMouseUpCallback(MouseCallback cb) override       { mouseUpCallback_ = std::move(cb); }
     void setKeyDownCallback(KeyCallback cb) override         { keyDownCallback_ = std::move(cb); }
     void setKeyUpCallback(KeyCallback cb) override           { keyUpCallback_ = std::move(cb); }
-    void setDragEnterCallback(DragEnterCallback cb) override { dragEnterCallback_ = std::move(cb); }
-    void setDragOverCallback(DragOverCallback cb) override   { dragOverCallback_ = std::move(cb); }
-    void setDragLeaveCallback(DragLeaveCallback cb) override { dragLeaveCallback_ = std::move(cb); }
-    void setDropCallback(DropCallback cb) override           { dropCallback_ = std::move(cb); }
+    void setDragEnterCallback(WindowDragEnterCallback cb) override { dragEnterCallback_ = std::move(cb); }
+    void setDragOverCallback(WindowDragOverCallback cb) override   { dragOverCallback_ = std::move(cb); }
+    void setDragLeaveCallback(WindowDragLeaveCallback cb) override { dragLeaveCallback_ = std::move(cb); }
+    void setDropCallback(WindowDropCallback cb) override           { dropCallback_ = std::move(cb); }
     void setCloseCallback(CloseCallback cb) override         { closeCallback_ = std::move(cb); }
 
 private:
@@ -321,10 +321,10 @@ private:
     MouseCallback mouseUpCallback_;
     KeyCallback keyDownCallback_;
     KeyCallback keyUpCallback_;
-    DragEnterCallback dragEnterCallback_;
-    DragOverCallback dragOverCallback_;
-    DragLeaveCallback dragLeaveCallback_;
-    DropCallback dropCallback_;
+    WindowDragEnterCallback dragEnterCallback_;
+    WindowDragOverCallback dragOverCallback_;
+    WindowDragLeaveCallback dragLeaveCallback_;
+    WindowDropCallback dropCallback_;
     CloseCallback closeCallback_;
 };
 

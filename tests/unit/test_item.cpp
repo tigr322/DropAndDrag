@@ -1,6 +1,7 @@
 #include "test_framework.hpp"
 
 #include <core/items/item.hpp>
+#include <core/items/item_json.hpp>
 #include <core/items/item_store.hpp>
 
 #include <thread>

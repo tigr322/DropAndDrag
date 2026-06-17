@@ -1,6 +1,6 @@
 cask "dropanddrag" do
   version "1.0.0"
-  sha256 arm:   "PLACEHOLDER_ARM64_SHA256",
+  sha256 arm:   "bc8fa302465815d7f38f588ee7b9f9062feeee1f3e94040bf49cfdb6a7123375",
          intel: "PLACEHOLDER_X64_SHA256"
 
   url "https://github.com/anomalyco/DropAndDrag/releases/download/v#{version}/DropAndDrag-#{version}.dmg"

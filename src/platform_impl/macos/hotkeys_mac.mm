@@ -16,6 +16,7 @@ EventHandlerRef gEventHandler = nullptr;
 OSStatus hotkeyHandler(EventHandlerCallRef /*nextHandler*/,
                        EventRef event,
                        void *userData) {
+    (void)event;
     auto *callback = static_cast<HotkeyCallback *>(userData);
     if (callback && *callback) {
         (*callback)();
@@ -32,7 +33,7 @@ uint32_t carbonModifiers(uint8_t ddMods) {
     return result;
 }
 
-uint8_t modifierFromCarbon(uint32_t carbonMod) {
+__attribute__((unused)) uint8_t modifierFromCarbon(uint32_t carbonMod) {
     uint8_t result = 0;
     if (carbonMod & controlKey) result |= static_cast<uint8_t>(Modifier::Ctrl);
     if (carbonMod & optionKey)  result |= static_cast<uint8_t>(Modifier::Alt);

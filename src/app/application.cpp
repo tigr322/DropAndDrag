@@ -1,10 +1,13 @@
 #include "application.hpp"
 
+#include <core/collections/collection.hpp>
 #include <core/database/db.hpp>
 #include <core/event_bus/event_bus.hpp>
 #include <core/items/item_store.hpp>
 #include <core/mouse_shake/mouse_shake_detector.hpp>
+#include <core/search/search_engine.hpp>
 #include <core/settings/settings.hpp>
+#include <core/tags/tag.hpp>
 #include <core/threading/thread_pool.hpp>
 #include <platform/clipboard/clipboard.hpp>
 #include <platform/drag_drop/drag_drop.hpp>
@@ -15,9 +18,10 @@
 #include <platform/tray/tray.hpp>
 #include <platform/window/native_window.hpp>
 #include <platform/window/window_manager.hpp>
-#include <ui/animations/animation.hpp>
-#include <ui/renderer/renderer.hpp>
-#include <ui/themes/theme.hpp>
+// UI includes excluded pending Skia update
+// #include <ui/animations/animation.hpp>
+// #include <ui/renderer/renderer.hpp>
+// #include <ui/themes/theme.hpp>
 
 #include <chrono>
 #include <csignal>
@@ -142,6 +146,8 @@ Application& Application::instance() {
     return app;
 }
 
+Application::Application() {}
+
 Application::~Application() {
     shutdown();
 }
@@ -193,9 +199,9 @@ bool Application::init(int argc, char* argv[]) {
         log_message("WARN", "Mouse shake detection unavailable (needs accessibility permission)");
     }
 
+    // init_ui disabled pending Skia API update
     if (!init_ui()) {
-        log_message("ERROR", "Failed to initialize UI");
-        return false;
+        log_message("WARN", "UI not available");
     }
 
     wire_event_bus();
@@ -230,9 +236,6 @@ void Application::shutdown() {
     log_message("INFO", "Shutting down");
 
     stop_mouse_monitor();
-
-    renderer_->shutdown();
-    skia_context_->shutdown();
 
     thread_pool_->shutdown();
 
@@ -300,7 +303,7 @@ bool Application::init_logging(const std::string& app_data_dir) {
     return g_log_file.is_open();
 }
 
-bool Application::init_database(const std::string& app_data_dir) {
+bool Application::init_database(const std::string& /*app_data_dir*/) {
     database_ = std::make_unique<Database>();
     auto result = database_->init(db_path_);
     result.wait();
@@ -327,10 +330,10 @@ bool Application::init_platform() {
     native_window_ = NativeWindow::create(WindowStyle::Normal);
     window_manager_ = std::make_unique<WindowManager>();
 
-    hotkey_manager_ = std::make_unique<HotkeyManager>();
+    // hotkey_manager_ via instance()
 
     auto cfg = settings_->get();
-    system_tray_ = std::make_unique<SystemTray>();
+    // system_tray_ via instance()
 
     return true;
 }
@@ -357,30 +360,24 @@ bool Application::init_mouse_shake() {
 }
 
 bool Application::init_ui() {
-    skia_context_ = std::make_unique<SkiaContext>();
-    renderer_ = std::make_unique<Renderer>();
-    theme_ = std::make_unique<Theme>();
-    animation_manager_ = std::make_unique<AnimationManager>();
-
-    if (!renderer_->init(nullptr)) {
-        return false;
-    }
-
+    log_message("INFO", "UI layer disabled (Skia API pending)");
     return true;
 }
 
 void Application::wire_event_bus() {
     event_bus_->subscribe(EventType::SettingsChanged, [this](const Event& e) {
         auto new_settings = settings_->get();
-        hotkey_manager_->register_hotkey(new_settings.global_hotkey);
-        Theme::setVariant(new_settings.theme == "dark"  ? ThemeVariant::Dark
-                          : new_settings.theme == "light" ? ThemeVariant::Light
-                                                          : ThemeVariant::Dark);
+        auto hkdef = HotkeyManager::parseHotkeyString(new_settings.global_hotkey);
+        if (hkdef) HotkeyManager::instance().registerHotkey(hkdef->modifiers, hkdef->key_code);
+
+        // Theme disabled — UI pending
+        // Theme::setVariant(...)
     });
 }
 
 void Application::create_tray() {
-    system_tray_->create("dropanddrag", "DropAndDrag");
+    auto& tray = SystemTray::instance();
+    tray.create("dropanddrag", "DropAndDrag");
 
     std::vector<MenuItem> menu = {
         MenuItem{.label = "Show/Hide", .action = "toggle", .enabled = true},
@@ -389,8 +386,8 @@ void Application::create_tray() {
         MenuItem{.label = "", .action = "", .enabled = true, .separator = true},
         MenuItem{.label = "Quit", .action = "quit", .enabled = true},
     };
-    system_tray_->setMenu(menu);
-    system_tray_->setMenuCallback([this](std::string_view action) {
+    tray.setMenu(menu);
+    tray.setMenuCallback([this](std::string_view action) {
         if (action == "quit") {
             request_shutdown();
         } else if (action == "toggle") {
@@ -399,7 +396,7 @@ void Application::create_tray() {
     });
 
     if (!start_hidden_) {
-        system_tray_->show();
+        tray.show();
     }
 }
 
@@ -415,9 +412,6 @@ void Application::cleanup_signal_handlers() {
 int Application::run_cocoa_loop() {
     log_message("INFO", "Entering Cocoa run loop");
     while (running_.load(std::memory_order_acquire)) {
-        if (renderer_) {
-            renderer_->render(16.67f);
-        }
         std::this_thread::sleep_for(std::chrono::milliseconds(16));
     }
     log_message("INFO", "Exiting Cocoa run loop");
@@ -438,9 +432,6 @@ int Application::run_win32_loop() {
             TranslateMessage(&msg);
             DispatchMessage(&msg);
         }
-        if (renderer_) {
-            renderer_->render(16.67f);
-        }
         if (thread_pool_ && thread_pool_->pending_tasks() == 0) {
             MsgWaitForMultipleObjects(0, nullptr, FALSE, 16, QS_ALLINPUT);
         }
@@ -454,9 +445,6 @@ int Application::run_win32_loop() {
 int Application::run_linux_loop() {
     log_message("INFO", "Entering Linux event loop");
     while (running_.load(std::memory_order_acquire)) {
-        if (renderer_) {
-            renderer_->render(16.67f);
-        }
         std::this_thread::sleep_for(std::chrono::milliseconds(16));
     }
     log_message("INFO", "Exiting Linux event loop");

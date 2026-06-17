@@ -26,9 +26,9 @@ echo ""
 # ---- step 2: create DMG ----
 echo -e "${CYAN}==> Step 2: Package DMG${NC}"
 ./packaging/macos/create_dmg.sh
-DMG_FILE="dist/DropAndDrag.dmg"
-if [ ! -f "$DMG_FILE" ]; then
-    echo -e "${RED}DMG not found at ${DMG_FILE}${NC}"
+DMG_FILE=$(ls dist/DropAndDrag-*.dmg 2>/dev/null | head -1)
+if [ -z "$DMG_FILE" ] || [ ! -f "$DMG_FILE" ]; then
+    echo -e "${RED}DMG not found in dist/${NC}"
     exit 1
 fi
 echo -e "${GREEN}  DMG: ${DMG_FILE}${NC}"

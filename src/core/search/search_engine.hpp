@@ -30,7 +30,7 @@ public:
 
     void set_db(sqlite3* db) noexcept { db_ = db; }
 
-private:
+public: // HACK
     SearchEngine() = default;
 
     sqlite3* db_{nullptr};

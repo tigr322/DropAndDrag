@@ -14,19 +14,6 @@ class EventBus;
 class SearchEngine;
 class ThreadPool;
 class WindowManager;
-class DragDropManager;
-class ClipboardManager;
-class HotkeyManager;
-class SystemTray;
-class FileSystemMonitor;
-class Notifications;
-class SkiaContext;
-class Renderer;
-class Theme;
-class AnimationManager;
-class ShelfView;
-class SearchBar;
-class ContextMenu;
 class NativeWindow;
 class Database;
 class MouseShakeDetector;
@@ -48,7 +35,7 @@ public:
     void request_shutdown() { running_.store(false, std::memory_order_release); }
 
 private:
-    Application() = default;
+    Application();
     ~Application();
 
     void setup_signal_handlers();
@@ -78,8 +65,6 @@ private:
 
     std::unique_ptr<Database> database_;
     std::unique_ptr<ItemStore> item_store_;
-    std::unique_ptr<CollectionStore> collection_store_;
-    std::unique_ptr<TagStore> tag_store_;
     std::unique_ptr<Settings> settings_;
     std::unique_ptr<EventBus> event_bus_;
     std::unique_ptr<SearchEngine> search_engine_;
@@ -87,20 +72,6 @@ private:
 
     std::unique_ptr<NativeWindow> native_window_;
     std::unique_ptr<WindowManager> window_manager_;
-    std::unique_ptr<DragDropManager> drag_drop_manager_;
-    std::unique_ptr<ClipboardManager> clipboard_manager_;
-    std::unique_ptr<HotkeyManager> hotkey_manager_;
-    std::unique_ptr<SystemTray> system_tray_;
-    std::unique_ptr<FileSystemMonitor> file_system_monitor_;
-    std::unique_ptr<Notifications> notifications_;
-
-    std::unique_ptr<SkiaContext> skia_context_;
-    std::unique_ptr<Renderer> renderer_;
-    std::unique_ptr<Theme> theme_;
-    std::unique_ptr<AnimationManager> animation_manager_;
-    std::unique_ptr<ShelfView> shelf_view_;
-    std::unique_ptr<SearchBar> search_bar_;
-    std::unique_ptr<ContextMenu> context_menu_;
 
     std::unique_ptr<MouseShakeDetector> shake_detector_;
 

@@ -23,10 +23,6 @@ StmtPtr prepare(sqlite3* db, std::string_view sql) {
     return StmtPtr(stmt);
 }
 
-std::string uuid_to_hex(std::string_view uuid) {
-    return std::string(uuid);
-}
-
 int64_t time_to_epoch(const std::chrono::system_clock::time_point& tp) {
     return std::chrono::duration_cast<std::chrono::seconds>(tp.time_since_epoch()).count();
 }
@@ -123,11 +119,6 @@ void exec_sql(sqlite3* db, std::string_view sql) {
 
 } // anonymous namespace
 
-Database& Database::instance() {
-    static Database db;
-    return db;
-}
-
 Database::~Database() {
     if (running_.load(std::memory_order_acquire)) {
         close().wait();
@@ -141,7 +132,7 @@ Database::~Database() {
     }
 }
 
-void Database::execute_async(std::move_only_function<void()> task) {
+void Database::execute_async(std::function<void()> task) {
     if (!running_.load(std::memory_order_acquire)) return;
 
     {
@@ -153,7 +144,7 @@ void Database::execute_async(std::move_only_function<void()> task) {
 
 void Database::db_thread_loop(std::stop_token stoken) {
     while (!stoken.stop_requested()) {
-        std::move_only_function<void()> task;
+        std::function<void()> task;
 
         {
             std::unique_lock lock(queue_mutex_);
@@ -399,8 +390,8 @@ std::future<bool> Database::deleteCollection(std::string_view id) {
     return future;
 }
 
-std::future<std::vector<nlohmann::json>> Database::getCollections() {
-    auto promise = std::make_shared<std::promise<std::vector<nlohmann::json>>>();
+std::future<std::vector<Collection>> Database::getCollections() {
+    auto promise = std::make_shared<std::promise<std::vector<Collection>>>();
     auto future = promise->get_future();
 
     execute_async([this, promise = std::move(promise)]() mutable {
@@ -410,15 +401,15 @@ std::future<std::vector<nlohmann::json>> Database::getCollections() {
         auto stmt = prepare(db_, sql);
         if (!stmt) { promise->set_value({}); return; }
 
-        std::vector<nlohmann::json> results;
+        std::vector<Collection> results;
         while (sqlite3_step(stmt.get()) == SQLITE_ROW) {
-            nlohmann::json j;
-            j["id"] = reinterpret_cast<const char*>(sqlite3_column_text(stmt.get(), 0));
-            j["name"] = reinterpret_cast<const char*>(sqlite3_column_text(stmt.get(), 1));
-            j["color"] = reinterpret_cast<const char*>(sqlite3_column_text(stmt.get(), 2));
-            j["icon"] = reinterpret_cast<const char*>(sqlite3_column_text(stmt.get(), 3));
-            j["order_index"] = sqlite3_column_int(stmt.get(), 4);
-            results.push_back(std::move(j));
+            Collection c;
+            c.id          = reinterpret_cast<const char*>(sqlite3_column_text(stmt.get(), 0));
+            c.name        = reinterpret_cast<const char*>(sqlite3_column_text(stmt.get(), 1));
+            c.color       = reinterpret_cast<const char*>(sqlite3_column_text(stmt.get(), 2));
+            c.icon        = reinterpret_cast<const char*>(sqlite3_column_text(stmt.get(), 3));
+            c.order_index = sqlite3_column_int(stmt.get(), 4);
+            results.push_back(std::move(c));
         }
         promise->set_value(std::move(results));
     });
@@ -466,8 +457,8 @@ std::future<bool> Database::removeTag(std::string_view name) {
     return future;
 }
 
-std::future<std::vector<nlohmann::json>> Database::getTags() {
-    auto promise = std::make_shared<std::promise<std::vector<nlohmann::json>>>();
+std::future<std::vector<Tag>> Database::getTags() {
+    auto promise = std::make_shared<std::promise<std::vector<Tag>>>();
     auto future = promise->get_future();
 
     execute_async([this, promise = std::move(promise)]() mutable {
@@ -476,12 +467,12 @@ std::future<std::vector<nlohmann::json>> Database::getTags() {
         auto stmt = prepare(db_, sql);
         if (!stmt) { promise->set_value({}); return; }
 
-        std::vector<nlohmann::json> results;
+        std::vector<Tag> results;
         while (sqlite3_step(stmt.get()) == SQLITE_ROW) {
-            nlohmann::json j;
-            j["name"] = reinterpret_cast<const char*>(sqlite3_column_text(stmt.get(), 0));
-            j["color"] = reinterpret_cast<const char*>(sqlite3_column_text(stmt.get(), 1));
-            results.push_back(std::move(j));
+            Tag t;
+            t.name  = reinterpret_cast<const char*>(sqlite3_column_text(stmt.get(), 0));
+            t.color = reinterpret_cast<const char*>(sqlite3_column_text(stmt.get(), 1));
+            results.push_back(std::move(t));
         }
         promise->set_value(std::move(results));
     });

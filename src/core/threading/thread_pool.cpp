@@ -36,7 +36,7 @@ size_t ThreadPool::pending_tasks() const noexcept {
 
 void ThreadPool::worker_loop(std::stop_token stoken, size_t /*index*/) {
     while (!stoken.stop_requested()) {
-        std::move_only_function<void()> task;
+        std::function<void()> task;
 
         {
             std::unique_lock lock(mutex_);

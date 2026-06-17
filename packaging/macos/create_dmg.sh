@@ -16,24 +16,14 @@ cmake --build "${BUILD_DIR}" --config Release --target DropAndDrag
 
 echo "=== Creating .app bundle ==="
 
-mkdir -p "${STAGING_DIR}/Contents/MacOS"
-mkdir -p "${STAGING_DIR}/Contents/Resources"
-
-cp "${BUILD_DIR}/DropAndDrag" "${STAGING_DIR}/Contents/MacOS/${APP_NAME}"
-
-if [ -f "${RESOURCES_DIR}/icons/icon.icns" ]; then
-    cp "${RESOURCES_DIR}/icons/icon.icns" "${STAGING_DIR}/Contents/Resources/"
+APP_BUNDLE="${BUILD_DIR}/${APP_NAME}.app"
+if [ ! -d "${APP_BUNDLE}" ]; then
+    echo "ERROR: ${APP_BUNDLE} not found. Run build.sh first."
+    exit 1
 fi
 
-cp "${PACKAGING_DIR}/Info.plist" "${STAGING_DIR}/Contents/"
-
-if [ -d "${RESOURCES_DIR}/fonts" ]; then
-    cp -r "${RESOURCES_DIR}/fonts" "${STAGING_DIR}/Contents/Resources/"
-fi
-
-if [ -d "${RESOURCES_DIR}/shaders" ]; then
-    cp -r "${RESOURCES_DIR}/shaders" "${STAGING_DIR}/Contents/Resources/"
-fi
+STAGING_DIR="$(mktemp -d)/${APP_NAME}.app"
+cp -R "${APP_BUNDLE}" "${STAGING_DIR}"
 
 BUNDLE_ID="com.dropanddrag.app"
 if [ -n "${DEVELOPER_ID_APPLICATION:-}" ]; then
@@ -46,8 +36,9 @@ fi
 
 echo "=== Creating DMG ==="
 
+mkdir -p dist
 DMG_NAME="${APP_NAME}-${VERSION}-macOS.dmg"
-DMG_PATH="${SRC_DIR}/${DMG_NAME}"
+DMG_PATH="dist/${DMG_NAME}"
 
 rm -f "${DMG_PATH}"
 

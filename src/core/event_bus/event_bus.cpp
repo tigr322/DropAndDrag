@@ -4,9 +4,16 @@
 
 namespace dd {
 
+EventBus* EventBus::s_override_ = nullptr;
+
 EventBus& EventBus::instance() {
+    if (s_override_) return *s_override_;
     static EventBus bus;
     return bus;
+}
+
+void EventBus::set_instance_for_test(EventBus* p) noexcept {
+    s_override_ = p;
 }
 
 SubscriptionToken EventBus::subscribe(EventType type, EventCallback callback) {
@@ -37,19 +44,17 @@ void EventBus::emit(Event event) {
             }
         }
     }
-
     for (const auto& cb : callbacks) {
         cb(event);
     }
 }
 
-void EventBus::emit(EventType type, nlohmann::json data) {
+void EventBus::emit(EventType type, std::any data) {
     emit(Event{
-        .type = type,
-        .data = std::move(data),
+        .type      = type,
+        .data      = std::move(data),
         .timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(
-            std::chrono::system_clock::now().time_since_epoch()
-        ).count(),
+                         std::chrono::system_clock::now().time_since_epoch()).count(),
     });
 }
 

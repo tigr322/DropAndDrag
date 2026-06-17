@@ -34,7 +34,7 @@ void HotkeyManager::setCallback(HotkeyCallback cb) {
 std::optional<HotkeyDefinition> HotkeyManager::parseHotkeyString(std::string_view str) {
     HotkeyDefinition def;
     std::string s{str};
-    std::stringstream ss(s);
+    std::istringstream ss(s);
     std::string token;
 
     while (std::getline(ss, token, '+')) {
