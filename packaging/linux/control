@@ -1,0 +1,22 @@
+Package: dropanddrag
+Version: 1.0.0
+Architecture: amd64
+Maintainer: DropAndDrag Team <support@dropanddrag.app>
+Section: utils
+Priority: optional
+Homepage: https://github.com/dropanddrag/dropanddrag
+Depends: libc6 (>= 2.28), libsqlite3-0 (>= 3.30), libx11-6, libwayland-client0, libgl1, libstdc++6 (>= 10)
+Recommends: libnotify4
+Description: Fast cross-platform drag-and-drop shelf utility
+ DropAndDrag is a lightweight, cross-platform drag-and-drop shelf
+ that provides quick access to frequently used files, folders,
+ images, text snippets, and URLs.
+ .
+ Features:
+  - Always-on-top floating shelf
+  - Drag-and-drop support for files, text, URLs, and images
+  - Full-text search with prefix matching
+  - Collections and tags for organization
+  - Global hotkey to show/hide
+  - System tray integration
+  - GPU-accelerated rendering via Skia
