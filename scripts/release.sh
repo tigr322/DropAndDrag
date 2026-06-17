@@ -2,7 +2,7 @@
 set -e
 
 VERSION="${1:-1.0.0}"
-GITHUB_REPO="anomalyco/DropAndDrag"
+GITHUB_REPO="tigr322/DropAndDrag"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'

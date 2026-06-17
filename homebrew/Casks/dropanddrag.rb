@@ -3,10 +3,10 @@ cask "dropanddrag" do
   sha256 arm:   "bc8fa302465815d7f38f588ee7b9f9062feeee1f3e94040bf49cfdb6a7123375",
          intel: "PLACEHOLDER_X64_SHA256"
 
-  url "https://github.com/anomalyco/DropAndDrag/releases/download/v#{version}/DropAndDrag-#{version}.dmg"
+  url "https://github.com/tigr322/DropAndDrag/releases/download/v#{version}/DropAndDrag-#{version}.dmg"
   name "DropAndDrag"
   desc "Fast cross-platform drag-and-drop shelf utility"
-  homepage "https://github.com/anomalyco/DropAndDrag"
+  homepage "https://github.com/tigr322/DropAndDrag"
 
   depends_on macos: ">= :ventura"
 
