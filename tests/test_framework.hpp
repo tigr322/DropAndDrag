@@ -27,10 +27,14 @@ struct TestRegistrar {
     }
 };
 
+#define DD_TEST_CONCAT_IMPL(x, y) x##y
+#define DD_TEST_CONCAT(x, y) DD_TEST_CONCAT_IMPL(x, y)
+
 #define TEST_CASE(name)                                                        \
-    static void test_func_##__LINE__();                                        \
-    static ::dd::test::TestRegistrar reg_##__LINE__(name, test_func_##__LINE__); \
-    static void test_func_##__LINE__()
+    static void DD_TEST_CONCAT(test_func_, __LINE__)();                        \
+    static ::dd::test::TestRegistrar DD_TEST_CONCAT(reg_, __LINE__)(            \
+        name, DD_TEST_CONCAT(test_func_, __LINE__));                           \
+    static void DD_TEST_CONCAT(test_func_, __LINE__)()
 
 inline void check(bool condition, std::string_view message,
                   std::source_location loc = std::source_location::current()) {
@@ -45,6 +49,10 @@ inline void check(bool condition, std::string_view message,
 #define ASSERT_FALSE(cond) ::dd::test::check(!(cond), #cond)
 #define ASSERT_EQ(a, b)    ::dd::test::check((a) == (b), #a " == " #b)
 #define ASSERT_NE(a, b)    ::dd::test::check((a) != (b), #a " != " #b)
+#define ASSERT_GE(a, b)    ::dd::test::check((a) >= (b), #a " >= " #b)
+#define ASSERT_GT(a, b)    ::dd::test::check((a) >  (b), #a " > "  #b)
+#define ASSERT_LE(a, b)    ::dd::test::check((a) <= (b), #a " <= " #b)
+#define ASSERT_LT(a, b)    ::dd::test::check((a) <  (b), #a " < "  #b)
 
 inline int run_all_tests() {
     const auto& tests = registry();

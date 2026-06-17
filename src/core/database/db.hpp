@@ -60,11 +60,11 @@ private:
     ~Database();
 
     void db_thread_loop(std::stop_token stoken);
-    void execute_async(std::move_only_function<void()> task);
+    void execute_async(std::function<void()> task);
 
     sqlite3* db_{nullptr};
     std::jthread db_thread_;
-    std::queue<std::move_only_function<void()>> task_queue_;
+    std::queue<std::function<void()>> task_queue_;
     mutable std::mutex queue_mutex_;
     std::condition_variable_any queue_cv_;
     std::atomic<bool> running_{false};

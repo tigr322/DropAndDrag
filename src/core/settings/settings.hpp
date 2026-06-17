@@ -21,6 +21,7 @@ struct SettingsData {
     int shelf_position_width{400};
     int shelf_position_height{300};
     bool startup_launch{true};
+    bool enable_shake_to_open{true};
 };
 
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(
@@ -37,7 +38,8 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(
     shelf_position_y,
     shelf_position_width,
     shelf_position_height,
-    startup_launch
+    startup_launch,
+    enable_shake_to_open
 )
 
 class Settings {
@@ -80,6 +82,8 @@ public:
     void set_shelf_position_height(int value);
     [[nodiscard]] bool startup_launch() const;
     void set_startup_launch(bool value);
+    [[nodiscard]] bool enable_shake_to_open() const;
+    void set_enable_shake_to_open(bool value);
 
 private:
     Settings() = default;

@@ -3,6 +3,9 @@
 #import <Carbon/Carbon.h>
 #import <Cocoa/Cocoa.h>
 
+#include <algorithm>
+#include <sstream>
+
 namespace dd {
 namespace {
 

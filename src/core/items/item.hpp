@@ -60,8 +60,6 @@ struct Item {
     Item& operator=(const Item&) = default;
 };
 
-namespace json_util {
-
 NLOHMANN_JSON_SERIALIZE_ENUM(ItemType, {
     {ItemType::File, "file"},
     {ItemType::Folder, "folder"},
@@ -71,19 +69,18 @@ NLOHMANN_JSON_SERIALIZE_ENUM(ItemType, {
     {ItemType::Unknown, "unknown"},
 })
 
-inline void to_json(nlohmann::json& j, const std::chrono::system_clock::time_point& tp) {
-    j = std::chrono::duration_cast<std::chrono::milliseconds>(tp.time_since_epoch()).count();
+inline int64_t tp_to_ms(const std::chrono::system_clock::time_point& tp) {
+    return std::chrono::duration_cast<std::chrono::milliseconds>(tp.time_since_epoch()).count();
 }
 
-inline void from_json(const nlohmann::json& j, std::chrono::system_clock::time_point& tp) {
-    tp = std::chrono::system_clock::time_point(std::chrono::milliseconds(j.get<int64_t>()));
+inline std::chrono::system_clock::time_point ms_to_tp(int64_t ms) {
+    return std::chrono::system_clock::time_point(std::chrono::milliseconds(ms));
 }
 
 inline void to_json(nlohmann::json& j, const ItemData& d) {
-    j = nlohmann::json{
-        {"uuid", d.uuid},
-        {"type", d.type},
-    };
+    j = nlohmann::json::object();
+    j["uuid"] = d.uuid;
+    j["type"] = d.type;
     if (d.path) j["path"] = *d.path;
     if (d.file_name) j["file_name"] = *d.file_name;
     if (d.text_content) j["text_content"] = *d.text_content;
@@ -112,39 +109,35 @@ inline void from_json(const nlohmann::json& j, ItemData& d) {
 }
 
 inline void to_json(nlohmann::json& j, const ItemMetadata& m) {
-    j = nlohmann::json{
-        {"uuid", m.uuid},
-        {"created_at", m.created_at},
-        {"modified_at", m.modified_at},
-        {"accessed_at", m.accessed_at},
-        {"is_favorite", m.is_favorite},
-        {"tags", m.tags},
-    };
+    j = nlohmann::json::object();
+    j["uuid"] = m.uuid;
+    j["created_at"] = tp_to_ms(m.created_at);
+    j["modified_at"] = tp_to_ms(m.modified_at);
+    j["accessed_at"] = tp_to_ms(m.accessed_at);
+    j["is_favorite"] = m.is_favorite;
+    j["tags"] = m.tags;
     if (m.collection_id) j["collection_id"] = *m.collection_id;
 }
 
 inline void from_json(const nlohmann::json& j, ItemMetadata& m) {
     j.at("uuid").get_to(m.uuid);
-    j.at("created_at").get_to(m.created_at);
-    j.at("modified_at").get_to(m.modified_at);
-    j.at("accessed_at").get_to(m.accessed_at);
+    m.created_at = ms_to_tp(j.at("created_at").get<int64_t>());
+    m.modified_at = ms_to_tp(j.at("modified_at").get<int64_t>());
+    m.accessed_at = ms_to_tp(j.at("accessed_at").get<int64_t>());
     j.at("is_favorite").get_to(m.is_favorite);
     j.at("tags").get_to(m.tags);
     if (j.contains("collection_id")) m.collection_id = j["collection_id"].get<std::string>();
 }
 
 inline void to_json(nlohmann::json& j, const Item& item) {
-    j = nlohmann::json{
-        {"data", item.data},
-        {"metadata", item.metadata},
-    };
+    j = nlohmann::json::object();
+    j["data"] = item.data;
+    j["metadata"] = item.metadata;
 }
 
 inline void from_json(const nlohmann::json& j, Item& item) {
-    j.at("data").get_to(item.data);
-    j.at("metadata").get_to(item.metadata);
+    item.data = j.at("data").get<ItemData>();
+    item.metadata = j.at("metadata").get<ItemMetadata>();
 }
-
-} // namespace json_util
 
 } // namespace dd

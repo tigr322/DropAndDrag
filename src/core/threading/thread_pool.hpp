@@ -35,7 +35,7 @@ private:
     void worker_loop(std::stop_token stoken, size_t index);
 
     std::vector<std::jthread> workers_;
-    std::queue<std::move_only_function<void()>> tasks_;
+    std::queue<std::function<void()>> tasks_;
     mutable std::mutex mutex_;
     std::condition_variable_any cv_;
     std::atomic<bool> stopped_{false};

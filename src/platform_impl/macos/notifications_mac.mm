@@ -2,9 +2,6 @@
 
 #import <UserNotifications/UserNotifications.h>
 
-namespace dd {
-namespace {
-
 @interface DDNotificationDelegate : NSObject <UNUserNotificationCenterDelegate>
 @property (nonatomic, copy) void (^onAction)(void);
 @end
@@ -35,6 +32,9 @@ didReceiveNotificationResponse:(UNNotificationResponse *)response
 
 @end
 
+namespace dd {
+namespace {
+
 DDNotificationDelegate *gDelegate = nil;
 bool gAuthorized = false;
 
@@ -63,7 +63,6 @@ void requestAuthorization(dispatch_block_t completion) {
 Notifications& Notifications::instance() {
     static Notifications instance;
 
-    // Request authorization on first access
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
         requestAuthorization(nil);
@@ -83,7 +82,6 @@ void Notifications::show(std::string_view title, std::string_view message) {
                 content.body = [NSString stringWithUTF8String:message.data()];
                 content.sound = [UNNotificationSound defaultSound];
 
-                // Fire immediately
                 UNNotificationRequest *request = [UNNotificationRequest
                     requestWithIdentifier:[[NSUUID UUID] UUIDString]
                     content:content
@@ -115,7 +113,6 @@ void Notifications::showWithAction(std::string_view title,
                                     std::string_view action_label,
                                     NotificationActionCallback callback) {
     @autoreleasepool {
-        // Register the action button category
         UNUserNotificationCenter *center = [UNUserNotificationCenter currentNotificationCenter];
 
         NSString *actionId = @"ACTION_BUTTON";
@@ -134,7 +131,6 @@ void Notifications::showWithAction(std::string_view title,
 
         [center setNotificationCategories:[NSSet setWithObject:category]];
 
-        // Wire the callback
         if (gDelegate && callback) {
             gDelegate.onAction = ^{
                 callback();

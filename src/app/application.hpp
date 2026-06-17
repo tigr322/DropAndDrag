@@ -29,6 +29,7 @@ class SearchBar;
 class ContextMenu;
 class NativeWindow;
 class Database;
+class MouseShakeDetector;
 
 class Application {
 public:
@@ -60,6 +61,7 @@ private:
     bool init_core_systems();
     bool init_threading();
     bool init_platform();
+    bool init_mouse_shake();
     bool init_ui();
     void wire_event_bus();
     void create_tray();
@@ -99,6 +101,8 @@ private:
     std::unique_ptr<ShelfView> shelf_view_;
     std::unique_ptr<SearchBar> search_bar_;
     std::unique_ptr<ContextMenu> context_menu_;
+
+    std::unique_ptr<MouseShakeDetector> shake_detector_;
 
     std::atomic<bool> running_{false};
     bool initialized_{false};

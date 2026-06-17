@@ -3,12 +3,14 @@
 #include <core/database/db.hpp>
 #include <core/event_bus/event_bus.hpp>
 #include <core/items/item_store.hpp>
+#include <core/mouse_shake/mouse_shake_detector.hpp>
 #include <core/settings/settings.hpp>
 #include <core/threading/thread_pool.hpp>
 #include <platform/clipboard/clipboard.hpp>
 #include <platform/drag_drop/drag_drop.hpp>
 #include <platform/fs_monitor/fs_monitor.hpp>
 #include <platform/hotkeys/hotkeys.hpp>
+#include <platform/mouse_monitor/mouse_monitor.hpp>
 #include <platform/notifications/notifications.hpp>
 #include <platform/tray/tray.hpp>
 #include <platform/window/native_window.hpp>
@@ -187,6 +189,10 @@ bool Application::init(int argc, char* argv[]) {
         return false;
     }
 
+    if (!init_mouse_shake()) {
+        log_message("WARN", "Mouse shake detection unavailable (needs accessibility permission)");
+    }
+
     if (!init_ui()) {
         log_message("ERROR", "Failed to initialize UI");
         return false;
@@ -222,6 +228,8 @@ void Application::shutdown() {
     }
 
     log_message("INFO", "Shutting down");
+
+    stop_mouse_monitor();
 
     renderer_->shutdown();
     skia_context_->shutdown();
@@ -324,6 +332,27 @@ bool Application::init_platform() {
     auto cfg = settings_->get();
     system_tray_ = std::make_unique<SystemTray>();
 
+    return true;
+}
+
+bool Application::init_mouse_shake() {
+    auto cfg = settings_->get();
+    ShakeConfig shake_cfg;
+    shake_cfg.enabled = cfg.enable_shake_to_open;
+
+    shake_detector_ = std::make_unique<MouseShakeDetector>(shake_cfg);
+
+    shake_detector_->set_callback([this]() {
+        event_bus_->emit(EventType::ShelfShown);
+        log_message("INFO", "Mouse shake detected — opening shelf");
+    });
+
+    if (!start_mouse_monitor(*shake_detector_)) {
+        shake_detector_.reset();
+        return false;
+    }
+
+    log_message("INFO", "Mouse shake detection active");
     return true;
 }
 

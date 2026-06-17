@@ -23,7 +23,8 @@ void Settings::set(const SettingsData& data) {
 }
 
 void Settings::load(std::string_view path) {
-    std::ifstream file(std::string(path));
+    std::string path_str(path);
+    std::ifstream file(path_str);
     if (!file.is_open()) return;
 
     nlohmann::json j;
@@ -38,7 +39,8 @@ void Settings::save(std::string_view path) const {
     std::shared_lock lock(mutex_);
     nlohmann::json j = data_;
 
-    std::ofstream file(std::string(path));
+    std::string path_str(path);
+    std::ofstream file(path_str);
     file << j.dump(2);
 }
 
@@ -80,5 +82,8 @@ void Settings::set_shelf_position_height(int value) { std::unique_lock lock(mute
 
 bool Settings::startup_launch() const { std::shared_lock lock(mutex_); return data_.startup_launch; }
 void Settings::set_startup_launch(bool value) { std::unique_lock lock(mutex_); data_.startup_launch = value; }
+
+bool Settings::enable_shake_to_open() const { std::shared_lock lock(mutex_); return data_.enable_shake_to_open; }
+void Settings::set_enable_shake_to_open(bool value) { std::unique_lock lock(mutex_); data_.enable_shake_to_open = value; }
 
 } // namespace dd
