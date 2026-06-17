@@ -350,8 +350,13 @@ bool Application::init_mouse_shake() {
     shake_detector_ = std::make_unique<MouseShakeDetector>(shake_cfg);
 
     shake_detector_->set_callback([this]() {
-        log_message("INFO", "Mouse shake detected — opening shelf");
+        log_message("INFO", "Shake — shelf shown");
+        int w = std::max(100, settings_->shelf_position_width());
+        int h = std::max(60, settings_->shelf_position_height());
+        native_window_->positionNearCursor(w, h);
+        native_window_->setAlwaysOnTop(true);
         native_window_->show();
+        renderer_->render(0);
     });
 
     if (!start_mouse_monitor(*shake_detector_)) {
@@ -379,41 +384,48 @@ bool Application::init_ui() {
     native_window_->setAlwaysOnTop(true);
     native_window_->setTransparency(0.95f);
 
-    int screen_w = 1440, screen_h = 900;
-    int shelf_x = (screen_w - width) / 2;
-    int shelf_y = screen_h - height - 60;
-    native_window_->setBounds(shelf_x, shelf_y, width, height);
+    native_window_->positionNearCursor(width, height);
 
-    ItemList test_items;
-    {
-        Item f;
-        f.data.uuid = "1"; f.data.type = ItemType::File;
-        f.data.file_name = "document.pdf"; f.data.file_size = 2048000;
-        test_items.push_back(std::move(f));
-    }
-    {
-        Item f;
-        f.data.uuid = "2"; f.data.type = ItemType::Image;
-        f.data.file_name = "photo.jpg"; f.data.file_size = 5140000;
-        test_items.push_back(std::move(f));
-    }
-    {
-        Item f;
-        f.data.uuid = "3"; f.data.type = ItemType::URL;
-        f.data.url = "https://github.com"; f.data.title = "GitHub";
-        test_items.push_back(std::move(f));
-    }
-    {
-        Item f;
-        f.data.uuid = "4"; f.data.type = ItemType::Text;
-        f.data.text_content = "The quick brown fox";
-        test_items.push_back(std::move(f));
-    }
-    renderer_->setItems(test_items);
+    // ── Drop callback ─────────────────────────────────────────────────────────
+    native_window_->setDropCallback([this](std::vector<std::string> paths) {
+        log_message("INFO", std::to_string(paths.size()) + " files dropped on shelf");
+        ItemList items = renderer_->items();
+        for (const auto& path : paths) {
+            Item f;
+            f.data.uuid = std::to_string(items.size() + 1);
+            f.data.path = path;
+            size_t slash = path.rfind('/');
+            f.data.file_name = (slash != std::string::npos) ? path.substr(slash + 1) : path;
+            f.data.type = ItemType::File;
+            items.push_back(std::move(f));
+        }
+        renderer_->setItems(items);
 
-    native_window_->show();
+        // Grow window width to fit all items (never shrinks here; clear does that).
+        int n        = static_cast<int>(items.size());
+        int needed_w = std::max(200, n * 64 + 40);
+        auto b = native_window_->getBounds();
+        if (needed_w > b.width) {
+            int cx = b.x + b.width / 2;
+            native_window_->setBounds(cx - needed_w / 2, b.y, needed_w, b.height);
+        }
 
-    log_message("INFO", "UI initialized");
+        renderer_->render(0);
+    });
+
+    // ── Clear callback — reset window to default width ────────────────────────
+    renderer_->setClearCallback([this]() {
+        log_message("INFO", "Shelf cleared");
+        constexpr int kDefaultW = 400;
+        auto b = native_window_->getBounds();
+        int cx = b.x + b.width / 2;
+        native_window_->setBounds(cx - kDefaultW / 2, b.y, kDefaultW, b.height);
+    });
+
+    // Start with empty shelf (hint text shown by drawShelf when items list is empty).
+    renderer_->setItems({});
+
+    log_message("INFO", "UI ready — shake while dragging to open shelf");
     return true;
 }
 
@@ -423,10 +435,8 @@ void Application::wire_event_bus() {
         auto hkdef = HotkeyManager::parseHotkeyString(new_settings.global_hotkey);
         if (hkdef) HotkeyManager::instance().registerHotkey(hkdef->modifiers, hkdef->key_code);
 
-        auto& theme = Theme::instance();
-        if (new_settings.theme == "dark") theme.setVariant(ThemeVariant::Dark);
-        else if (new_settings.theme == "light") theme.setVariant(ThemeVariant::Light);
-        else theme.detectSystemTheme();
+        // Theme not initialized yet
+        // auto& theme = Theme::instance(); ...
     });
 }
 
@@ -446,7 +456,12 @@ void Application::create_tray() {
         if (action == "quit") {
             request_shutdown();
         } else if (action == "toggle") {
-            event_bus_->emit(EventType::ShelfShown);
+            if (native_window_->isVisible()) {
+                native_window_->hide();
+            } else {
+                native_window_->show();
+                native_window_->setAlwaysOnTop(true);
+            }
         }
     });
 

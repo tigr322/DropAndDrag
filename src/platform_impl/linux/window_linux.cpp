@@ -751,7 +751,12 @@ void DDLinuxWindow::handleSelectionNotify(const XEvent& ev) {
         }
 
         if (drop_callback_ && !items.empty()) {
-            drop_callback_(0, 0);
+            std::vector<std::string> paths;
+            for (const auto& it : items) {
+                if (!it.file_path.empty()) paths.push_back(it.file_path);
+                else if (!it.text.empty()) paths.push_back(it.text);
+            }
+            drop_callback_(std::move(paths));
         }
 
         auto& dd = DragDropManager::instance();

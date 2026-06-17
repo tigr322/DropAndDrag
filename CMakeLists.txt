@@ -88,6 +88,9 @@ target_link_libraries(DropAndDragCore PUBLIC
 
 add_library(DropAndDragPlatform STATIC ${PLATFORM_ABSTRACT_SOURCES} ${PLATFORM_IMPL_SOURCES})
 target_include_directories(DropAndDragPlatform PUBLIC src src/vendor)
+if(APPLE)
+    target_compile_options(DropAndDragPlatform PRIVATE -fobjc-arc)
+endif()
 target_link_libraries(DropAndDragPlatform PUBLIC
     DropAndDragCore
     Threads::Threads
@@ -95,6 +98,9 @@ target_link_libraries(DropAndDragPlatform PUBLIC
 
 add_library(DropAndDragUI STATIC ${UI_SOURCES})
 target_include_directories(DropAndDragUI PUBLIC src src/vendor)
+if(APPLE)
+    target_compile_options(DropAndDragUI PRIVATE -fobjc-arc)
+endif()
 target_link_libraries(DropAndDragUI PUBLIC
     DropAndDragCore
     Skia::Skia
@@ -121,6 +127,7 @@ if(APPLE)
     find_library(QUARTZ_LIB QuartzCore REQUIRED)
     find_library(METAL_LIB Metal REQUIRED)
     find_library(METALKIT_LIB MetalKit REQUIRED)
+    find_library(QUICKLOOK_LIB QuickLookThumbnailing REQUIRED)
     target_link_libraries(DropAndDragPlatform PRIVATE
         ${COCOA_LIB}
         ${CARBON_LIB}
@@ -128,12 +135,17 @@ if(APPLE)
         ${METAL_LIB}
         ${METALKIT_LIB}
     )
+    target_link_libraries(DropAndDragUI PRIVATE
+        ${COCOA_LIB}
+        ${QUICKLOOK_LIB}
+    )
     target_link_libraries(DropAndDrag PRIVATE
         ${COCOA_LIB}
         ${CARBON_LIB}
         ${QUARTZ_LIB}
         ${METAL_LIB}
         ${METALKIT_LIB}
+        ${QUICKLOOK_LIB}
     )
     set_target_properties(DropAndDrag PROPERTIES
         MACOSX_BUNDLE TRUE

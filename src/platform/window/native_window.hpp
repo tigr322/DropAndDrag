@@ -3,7 +3,9 @@
 #include <cstdint>
 #include <functional>
 #include <memory>
+#include <string>
 #include <string_view>
+#include <vector>
 
 namespace dd {
 
@@ -36,7 +38,7 @@ using KeyCallback = std::function<void(int key_code, int modifiers)>;
 using WindowDragEnterCallback = std::function<void(int x, int y)>;
 using WindowDragOverCallback  = std::function<void(int x, int y)>;
 using WindowDragLeaveCallback = std::function<void()>;
-using WindowDropCallback      = std::function<void(int x, int y)>;
+using WindowDropCallback = std::function<void(std::vector<std::string> paths)>;
 using CloseCallback = std::function<void()>;
 
 class NativeWindow {
@@ -69,6 +71,10 @@ public:
     virtual void setDragLeaveCallback(WindowDragLeaveCallback cb) = 0;
     virtual void setDropCallback(WindowDropCallback cb) = 0;
     virtual void setCloseCallback(CloseCallback cb) = 0;
+
+    // Position the window so it appears near the current cursor position.
+    // Default no-op keeps non-macOS platforms compiling without changes.
+    virtual void positionNearCursor(int w, int h) { (void)w; (void)h; }
 
     static std::unique_ptr<NativeWindow> create(WindowStyle style);
 };

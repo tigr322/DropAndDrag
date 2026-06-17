@@ -1,173 +1,526 @@
 #import <Cocoa/Cocoa.h>
+#import <QuickLookThumbnailing/QuickLookThumbnailing.h>
+#import "../platform_impl/macos/dd_renderable.h"
 #include "renderer.hpp"
 #include <core/items/item.hpp>
-#import <Metal/Metal.h>
-#import <QuartzCore/CAMetalLayer.h>
-#include <include/core/SkFont.h>
-#include <include/core/SkPaint.h>
-#include <include/core/SkRRect.h>
-#include <include/core/SkPath.h>
-#include <include/effects/SkImageFilters.h>
+#include <algorithm>
+#include <set>
+
+// ─── File-scope globals ───────────────────────────────────────────────────────
+
+static NSView* g_view = nil;
+static int     g_w    = 400;
+static int     g_h    = 120;
+
+// Updated by drawShelf every frame; read by all interaction blocks.
+// Main-thread only — no locking needed.
+static CGFloat         g_item_x0      = 12.0;
+static CGFloat         g_item_y0      = 12.0;
+static NSRect          g_clearBtnRect = {};
+static NSRect          g_hideBtnRect  = {};
+static std::set<size_t> g_selectedIndices;   // currently selected tile indices
+
+// ─── Caches — main thread only ───────────────────────────────────────────────
+
+static NSMutableDictionary<NSString*, NSImage*>* g_iconCache;
+static NSMutableDictionary<NSString*, NSImage*>* g_thumbCache;
+static NSMutableDictionary<NSString*, NSImage*>* g_faviconCache;
+static NSMutableSet<NSString*>*                  g_pendingThumbs;
+static NSMutableSet<NSString*>*                  g_pendingFavicons;
+
+static void ensureCaches(void) {
+    if (!g_iconCache)       g_iconCache      = [NSMutableDictionary dictionary];
+    if (!g_thumbCache)      g_thumbCache     = [NSMutableDictionary dictionary];
+    if (!g_faviconCache)    g_faviconCache   = [NSMutableDictionary dictionary];
+    if (!g_pendingThumbs)   g_pendingThumbs  = [NSMutableSet set];
+    if (!g_pendingFavicons) g_pendingFavicons = [NSMutableSet set];
+}
+
+// ─── systemIconForPath ───────────────────────────────────────────────────────
+
+static NSImage* systemIconForPath(NSString* path) {
+    NSString* key = (path.length > 0) ? path : @"__generic__";
+    NSImage* hit = g_iconCache[key];
+    if (hit) return hit;
+    NSImage* icon = (path.length > 0)
+        ? [[NSWorkspace sharedWorkspace] iconForFile:path]
+        : [[NSWorkspace sharedWorkspace] iconForFileType:@"public.data"];
+    if (!icon) icon = [NSImage imageNamed:NSImageNameMultipleDocuments];
+    if (icon) g_iconCache[key] = icon;
+    return icon;
+}
+
+// ─── requestThumbnail ────────────────────────────────────────────────────────
+
+static void requestThumbnail(NSString* filePath, NSString* uuid) {
+    if ([g_pendingThumbs containsObject:uuid]) return;
+    [g_pendingThumbs addObject:uuid];
+
+    if (@available(macOS 10.15, *)) {
+        NSURL* url = [NSURL fileURLWithPath:filePath];
+        QLThumbnailGenerationRequest* req =
+            [[QLThumbnailGenerationRequest alloc]
+                initWithFileAtURL:url
+                             size:CGSizeMake(96, 96)
+                            scale:2.0
+                representationTypes:QLThumbnailGenerationRequestRepresentationTypeThumbnail];
+        [[QLThumbnailGenerator sharedGenerator]
+            generateBestRepresentationForRequest:req
+            completionHandler:^(QLThumbnailRepresentation* rep, NSError* err) {
+                NSImage* img = (!err && rep) ? rep.NSImage : nil;
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    if (img) { [img setSize:NSMakeSize(48, 48)]; g_thumbCache[uuid] = img; }
+                    else     [g_pendingThumbs removeObject:uuid];
+                    if (g_view) [g_view setNeedsDisplay:YES];
+                });
+            }];
+    } else {
+        [g_pendingThumbs removeObject:uuid];
+    }
+}
+
+// ─── requestFavicon ──────────────────────────────────────────────────────────
+
+static void requestFavicon(NSString* domain) {
+    if ([g_pendingFavicons containsObject:domain]) return;
+    [g_pendingFavicons addObject:domain];
+
+    NSURL* url = [NSURL URLWithString:
+        [NSString stringWithFormat:
+            @"https://www.google.com/s2/favicons?domain=%@&sz=64", domain]];
+    [[[NSURLSession sharedSession]
+        dataTaskWithURL:url
+        completionHandler:^(NSData* data, NSURLResponse*, NSError* err) {
+            NSImage* img = (!err && data.length > 0)
+                ? [[NSImage alloc] initWithData:data] : nil;
+            dispatch_async(dispatch_get_main_queue(), ^{
+                if (img) g_faviconCache[domain] = img;
+                else     [g_pendingFavicons removeObject:domain];
+                if (g_view) [g_view setNeedsDisplay:YES];
+            });
+        }] resume];
+}
+
+// ─── iconForItem ─────────────────────────────────────────────────────────────
+
+static NSImage* iconForItem(const dd::Item& item) {
+    switch (item.data.type) {
+        case dd::ItemType::File:
+        case dd::ItemType::Folder: {
+            NSString* path = item.data.path.has_value()
+                ? [NSString stringWithUTF8String:item.data.path->c_str()]
+                : @"";
+            return systemIconForPath(path);
+        }
+        case dd::ItemType::Image: {
+            NSString* uuid = [NSString stringWithUTF8String:item.data.uuid.c_str()];
+            NSImage* thumb = g_thumbCache[uuid];
+            if (thumb) return thumb;
+            if (item.data.path.has_value())
+                requestThumbnail(
+                    [NSString stringWithUTF8String:item.data.path->c_str()], uuid);
+            NSString* path = item.data.path.has_value()
+                ? [NSString stringWithUTF8String:item.data.path->c_str()]
+                : @"";
+            return systemIconForPath(path);
+        }
+        case dd::ItemType::URL: {
+            NSString* urlStr = nil;
+            if (item.data.path.has_value())
+                urlStr = [NSString stringWithUTF8String:item.data.path->c_str()];
+            else if (item.data.text_content.has_value())
+                urlStr = [NSString stringWithUTF8String:item.data.text_content->c_str()];
+            if (urlStr.length > 0) {
+                NSString* domain = [NSURL URLWithString:urlStr].host;
+                if (domain.length > 0) {
+                    NSImage* fav = g_faviconCache[domain];
+                    if (fav) return fav;
+                    requestFavicon(domain);
+                }
+            }
+            return [NSImage imageNamed:NSImageNameNetwork];
+        }
+        case dd::ItemType::Text:
+        default:
+            return nil;
+    }
+}
+
+// ─── drawColoredTile ─────────────────────────────────────────────────────────
+
+static void drawColoredTile(NSRect r, const dd::Item& item) {
+    const char* type = "T";
+    NSColor* col = [NSColor systemRedColor];
+    switch (item.data.type) {
+        case dd::ItemType::File:   type = "F"; col = [NSColor systemBlueColor];   break;
+        case dd::ItemType::Folder: type = "D"; col = [NSColor systemTealColor];   break;
+        case dd::ItemType::Image:  type = "I"; col = [NSColor systemGreenColor];  break;
+        case dd::ItemType::URL:    type = "U"; col = [NSColor systemOrangeColor]; break;
+        default: break;
+    }
+    NSBezierPath* bg = [NSBezierPath bezierPathWithRoundedRect:r xRadius:8 yRadius:8];
+    [col setFill]; [bg fill];
+    NSDictionary* a = @{ NSFontAttributeName: [NSFont boldSystemFontOfSize:18],
+                         NSForegroundColorAttributeName: [NSColor whiteColor] };
+    NSString* lbl = [NSString stringWithUTF8String:type];
+    NSSize sz = [lbl sizeWithAttributes:a];
+    [lbl drawAtPoint:NSMakePoint(NSMinX(r) + (48 - sz.width)  / 2,
+                                  NSMinY(r) + (48 - sz.height) / 2 - 2)
+       withAttributes:a];
+}
+
+// ─── Geometry helpers ─────────────────────────────────────────────────────────
+
+// Layout constants
+static const CGFloat kStep  = 64.0;
+static const CGFloat kIconW = 48.0;
+static const CGFloat kIconH = 48.0;
+static const CGFloat kTileH = 62.0; // icon + label row height
+static const CGFloat kBtnSz = 18.0;
+static const CGFloat kBtnMg = 7.0;
+
+// Returns the tile index under `pt`, or -1 if none.
+static NSInteger hitTestItemAt(NSPoint pt, NSUInteger count) {
+    if (count == 0) return -1;
+    NSInteger idx = (NSInteger)((pt.x - g_item_x0) / kStep);
+    if (idx < 0 || idx >= (NSInteger)count) return -1;
+    CGFloat tx = g_item_x0 + (CGFloat)idx * kStep;
+    if (pt.x < tx || pt.x > tx + kIconW ||
+        pt.y < g_item_y0 || pt.y > g_item_y0 + kTileH) return -1;
+    return idx;
+}
+
+// ─── drawShelf ────────────────────────────────────────────────────────────────
+
+static void drawShelf(CGContextRef ctx, CGRect bounds, const dd::ItemList& items) {
+    ensureCaches();
+
+    // Background
+    CGContextSetRGBFillColor(ctx, 0.0, 0.0, 0.0, 0.55);
+    CGRect bg = CGRectInset(bounds, 2, 2);
+    CGMutablePathRef bgPath = CGPathCreateMutable();
+    CGPathAddRoundedRect(bgPath, nullptr, bg, 14, 14);
+    CGContextAddPath(ctx, bgPath);
+    CGContextFillPath(ctx);
+    CGPathRelease(bgPath);
+
+    NSUInteger n = items.size();
+
+    // ── Hide button — top-left amber circle ───────────────────────────────────
+    g_hideBtnRect = NSMakeRect(kBtnMg, kBtnMg, kBtnSz, kBtnSz);
+    {
+        NSBezierPath* circle = [NSBezierPath bezierPathWithOvalInRect:g_hideBtnRect];
+        [[NSColor colorWithRed:0.98 green:0.74 blue:0.18 alpha:0.90] setFill];
+        [circle fill];
+        // Minus symbol
+        CGContextSaveGState(ctx);
+        CGContextSetStrokeColorWithColor(ctx,
+            [[NSColor colorWithRed:0.55 green:0.40 blue:0.02 alpha:0.85] CGColor]);
+        CGContextSetLineWidth(ctx, 1.5);
+        CGContextSetLineCap(ctx, kCGLineCapRound);
+        CGFloat cx = NSMidX(g_hideBtnRect), cy = NSMidY(g_hideBtnRect);
+        CGContextMoveToPoint(ctx, cx - 3.5, cy);
+        CGContextAddLineToPoint(ctx, cx + 3.5, cy);
+        CGContextStrokePath(ctx);
+        CGContextRestoreGState(ctx);
+    }
+
+    // ── Clear button — top-right gray circle (only when items present) ────────
+    g_clearBtnRect = (n > 0)
+        ? NSMakeRect(bounds.size.width - kBtnSz - kBtnMg, kBtnMg, kBtnSz, kBtnSz)
+        : NSZeroRect;
+
+    if (n > 0) {
+        NSBezierPath* circle = [NSBezierPath bezierPathWithOvalInRect:g_clearBtnRect];
+        [[NSColor colorWithWhite:1.0 alpha:0.18] setFill];
+        [circle fill];
+        CGContextSaveGState(ctx);
+        CGContextSetStrokeColorWithColor(ctx,
+            [[NSColor colorWithWhite:0.9 alpha:0.85] CGColor]);
+        CGContextSetLineWidth(ctx, 1.5);
+        CGContextSetLineCap(ctx, kCGLineCapRound);
+        CGFloat cx = NSMidX(g_clearBtnRect), cy = NSMidY(g_clearBtnRect), d = 3.5;
+        CGContextMoveToPoint(ctx, cx - d, cy - d); CGContextAddLineToPoint(ctx, cx + d, cy + d);
+        CGContextMoveToPoint(ctx, cx + d, cy - d); CGContextAddLineToPoint(ctx, cx - d, cy + d);
+        CGContextStrokePath(ctx);
+        CGContextRestoreGState(ctx);
+    }
+
+    // ── Centered layout ───────────────────────────────────────────────────────
+    CGFloat groupW = n > 0 ? (CGFloat)(n - 1) * kStep + kIconW : 0;
+    g_item_x0 = n > 0
+        ? std::max(12.0, (bounds.size.width - groupW) / 2.0)
+        : 12.0;
+    g_item_y0 = std::max(8.0, (bounds.size.height - kTileH) / 2.0);
+
+    // ── Empty state ───────────────────────────────────────────────────────────
+    if (n == 0) {
+        NSDictionary* hint = @{
+            NSFontAttributeName: [NSFont systemFontOfSize:13],
+            NSForegroundColorAttributeName: [NSColor colorWithWhite:0.75 alpha:0.55]
+        };
+        NSString* msg = @"Drop files here";
+        NSSize ms = [msg sizeWithAttributes:hint];
+        [msg drawAtPoint:NSMakePoint((bounds.size.width  - ms.width)  / 2,
+                                      (bounds.size.height - ms.height) / 2)
+           withAttributes:hint];
+        return;
+    }
+
+    // ── Item tiles ────────────────────────────────────────────────────────────
+    NSDictionary* labelAttrs = @{
+        NSFontAttributeName: [NSFont systemFontOfSize:10],
+        NSForegroundColorAttributeName: [NSColor colorWithWhite:0.9 alpha:1.0]
+    };
+
+    CGFloat x = g_item_x0, y = g_item_y0;
+
+    for (NSUInteger i = 0; i < n; ++i) {
+        const auto& item = items[i];
+        NSRect iconRect = NSMakeRect(x, y, kIconW, kIconH);
+        bool selected = g_selectedIndices.count(i) > 0;
+
+        // Selection highlight behind the icon (before clipping)
+        if (selected) {
+            CGContextSaveGState(ctx);
+            CGMutablePathRef selPath = CGPathCreateMutable();
+            // Slightly larger than icon to make the glow visible
+            CGPathAddRoundedRect(selPath, nullptr,
+                CGRectInset(NSRectToCGRect(iconRect), -3, -3), 10, 10);
+            CGContextAddPath(ctx, selPath);
+            CGContextSetRGBFillColor(ctx, 0.20, 0.50, 1.0, 0.30);
+            CGContextFillPath(ctx);
+            CGPathRelease(selPath);
+            CGContextRestoreGState(ctx);
+        }
+
+        // Icon (clipped to rounded rect)
+        NSImage* icon = iconForItem(item);
+        if (icon) {
+            CGContextSaveGState(ctx);
+            CGMutablePathRef clip = CGPathCreateMutable();
+            CGPathAddRoundedRect(clip, nullptr, NSRectToCGRect(iconRect), 8, 8);
+            CGContextAddPath(ctx, clip);
+            CGContextClip(ctx);
+            CGPathRelease(clip);
+            [icon drawInRect:iconRect
+                    fromRect:NSZeroRect
+                   operation:NSCompositingOperationSourceOver
+                    fraction:1.0
+              respectFlipped:YES
+                       hints:nil];
+            CGContextRestoreGState(ctx);
+        } else {
+            drawColoredTile(iconRect, item);
+        }
+
+        // Selection border on top of icon
+        if (selected) {
+            NSBezierPath* border = [NSBezierPath
+                bezierPathWithRoundedRect:NSInsetRect(iconRect, 1.5, 1.5)
+                                  xRadius:7 yRadius:7];
+            border.lineWidth = 2.5;
+            [[NSColor colorWithRed:0.20 green:0.50 blue:1.0 alpha:0.95] setStroke];
+            [border stroke];
+        }
+
+        // Label
+        std::string name = item.data.file_name.value_or(
+            item.data.title.value_or(item.data.text_content.value_or("item")));
+        if (name.size() > 16) { name = name.substr(0, 14); name += "..."; }
+        NSString* nStr = [NSString stringWithUTF8String:name.c_str()];
+        NSSize ns = [nStr sizeWithAttributes:labelAttrs];
+        [nStr drawAtPoint:NSMakePoint(iconRect.origin.x + (kIconW - ns.width) / 2,
+                                       iconRect.origin.y + kIconH + 2)
+           withAttributes:labelAttrs];
+
+        x += kStep;
+    }
+}
+
+// ─── Renderer ────────────────────────────────────────────────────────────────
 
 namespace dd {
 
 Renderer::~Renderer() { shutdown(); }
 
 bool Renderer::init(void* view, int w, int h) {
-    width_ = w;
-    height_ = h;
-
-    id<MTLDevice> device = MTLCreateSystemDefaultDevice();
-    if (!device) return false;
-
-    GrMtlBackendContext ctx;
-    ctx.fDevice.retain((__bridge void*)device);
-    ctx.fQueue.retain((__bridge void*)[device newCommandQueue]);
-    gpu_ = GrDirectContexts::MakeMetal(ctx);
-    if (!gpu_) return false;
+    width_ = w; height_ = h;
+    g_w = w; g_h = h;
 
     if (view) {
-        NSView* nsview = (__bridge NSView*)view;
-        nsview.wantsLayer = YES;
-        CAMetalLayer* ml = [CAMetalLayer layer];
-        ml.device = device;
-        ml.pixelFormat = MTLPixelFormatBGRA8Unorm;
-        ml.framebufferOnly = NO;
-        nsview.layer = ml;
-        metal_layer_ = (__bridge void*)ml;
+        g_view = (__bridge NSView*)view;
+        auto si = shared_items_;
+        auto cc = clearCallback_;
+
+        if ([g_view conformsToProtocol:@protocol(DDRenderable)]) {
+            id<DDRenderable> rv = (id<DDRenderable>)g_view;
+
+            // ── Draw ─────────────────────────────────────────────────────────
+            rv.ddDrawBlock = ^(CGContextRef ctx, CGRect boundsIn) {
+                drawShelf(ctx, boundsIn, *si);
+            };
+
+            // ── Hit-test (mouseDownCanMoveWindow) ─────────────────────────────
+            // Returns YES for buttons and tiles → prevents window drag on those.
+            rv.ddHitTestBlock = ^BOOL(NSPoint pt) {
+                if (NSPointInRect(pt, g_hideBtnRect))  return YES;
+                if (!NSEqualRects(g_clearBtnRect, NSZeroRect) &&
+                    NSPointInRect(pt, g_clearBtnRect)) return YES;
+                return hitTestItemAt(pt, si->size()) >= 0;
+            };
+
+            // ── Click handling ───────────────────────────────────────────────
+            // Handles buttons and selection changes.
+            // Returns YES to consume (skip normal mouseDown:); NO to let
+            // mouseDown: continue (needed so _mouseDownPt is set for drag).
+            rv.ddHandleClickBlock = ^BOOL(NSPoint pt) {
+                // Hide button
+                if (NSPointInRect(pt, g_hideBtnRect)) {
+                    if (g_view) [[g_view window] orderOut:nil];
+                    return YES;
+                }
+                // Clear button
+                if (!NSEqualRects(g_clearBtnRect, NSZeroRect) &&
+                    NSPointInRect(pt, g_clearBtnRect) && !si->empty()) {
+                    g_selectedIndices.clear();
+                    si->clear();
+                    if (*cc) (*cc)();
+                    if (g_view) [g_view setNeedsDisplay:YES];
+                    return YES;
+                }
+                // Item tile — update selection but return NO so mouseDown:
+                // still records _mouseDownPt (needed for drag-out detection).
+                NSInteger idx = hitTestItemAt(pt, si->size());
+                if (idx >= 0) {
+                    bool alreadySelected = g_selectedIndices.count((size_t)idx) > 0;
+                    bool cmdDown = ([NSEvent modifierFlags] &
+                                    NSEventModifierFlagCommand) != 0;
+                    if (cmdDown) {
+                        // Toggle
+                        if (alreadySelected) g_selectedIndices.erase((size_t)idx);
+                        else                 g_selectedIndices.insert((size_t)idx);
+                        if (g_view) [g_view setNeedsDisplay:YES];
+                    } else if (!alreadySelected || g_selectedIndices.size() <= 1) {
+                        // Select only this one (unless it's already part of a
+                        // multi-selection — we preserve the group for drag).
+                        g_selectedIndices.clear();
+                        g_selectedIndices.insert((size_t)idx);
+                        if (g_view) [g_view setNeedsDisplay:YES];
+                    }
+                    return NO; // let mouseDown: set _mouseDownPt
+                }
+                // Background click — deselect all
+                if (!g_selectedIndices.empty()) {
+                    g_selectedIndices.clear();
+                    if (g_view) [g_view setNeedsDisplay:YES];
+                }
+                return NO;
+            };
+
+            // ── Drag-out ─────────────────────────────────────────────────────
+            // If the drag starts on a selected tile, drags ALL selected tiles.
+            // Otherwise drags only the tile under the cursor.
+            rv.ddDragOutBlock = ^NSArray<NSDraggingItem*>*(NSPoint pt) {
+                const dd::ItemList& items = *si;
+                if (items.empty()) return nil;
+
+                NSInteger clickedIdx = hitTestItemAt(pt, items.size());
+                if (clickedIdx < 0) return nil;
+
+                // Build the set to drag
+                std::vector<size_t> toDrag;
+                if (g_selectedIndices.count((size_t)clickedIdx)) {
+                    toDrag.assign(g_selectedIndices.begin(), g_selectedIndices.end());
+                } else {
+                    toDrag = { (size_t)clickedIdx };
+                }
+
+                NSMutableArray<NSDraggingItem*>* result = [NSMutableArray array];
+                for (size_t i : toDrag) {
+                    if (i >= items.size()) continue;
+                    const auto& item = items[i];
+                    CGFloat tileX = g_item_x0 + (CGFloat)i * kStep;
+
+                    // Drag ghost
+                    NSImage* tile = iconForItem(item);
+                    if (!tile) {
+                        tile = [[NSImage alloc] initWithSize:NSMakeSize(kIconW, kIconH)];
+                        [tile lockFocus];
+                        drawColoredTile(NSMakeRect(0, 0, kIconW, kIconH), item);
+                        [tile unlockFocus];
+                    }
+
+                    // Pasteboard writer
+                    id<NSPasteboardWriting> writer = nil;
+                    if (item.data.path.has_value()) {
+                        writer = [NSURL fileURLWithPath:
+                            [NSString stringWithUTF8String:item.data.path->c_str()]];
+                    } else {
+                        NSString* text = nil;
+                        if (item.data.text_content.has_value())
+                            text = [NSString stringWithUTF8String:
+                                item.data.text_content->c_str()];
+                        else if (item.data.title.has_value())
+                            text = [NSString stringWithUTF8String:
+                                item.data.title->c_str()];
+                        if (text) {
+                            NSPasteboardItem* pbi = [[NSPasteboardItem alloc] init];
+                            [pbi setString:text forType:NSPasteboardTypeString];
+                            writer = pbi;
+                        }
+                    }
+                    if (!writer) continue;
+
+                    NSDraggingItem* di =
+                        [[NSDraggingItem alloc] initWithPasteboardWriter:writer];
+                    [di setDraggingFrame:NSMakeRect(tileX, g_item_y0, kIconW, kIconH)
+                                contents:tile];
+                    [result addObject:di];
+                }
+                return result.count > 0 ? result : nil;
+            };
+        }
     }
 
-    resize(w, h);
     ok_ = true;
     return true;
 }
 
-void Renderer::resize(int w, int h) {
-    width_ = w;
-    height_ = h;
-    surface_ = nullptr;
-
-    if (!metal_layer_) return;
-
-    CAMetalLayer* ml = (__bridge CAMetalLayer*)metal_layer_;
-    ml.drawableSize = CGSizeMake(w, h);
-
-    id<CAMetalDrawable> drawable = [ml nextDrawable];
-    if (!drawable) return;
-
-    GrMtlTextureInfo info;
-    info.fTexture.retain((__bridge GrMTLHandle)drawable.texture);
-
-    auto rt = GrBackendRenderTargets::MakeMtl(w, h, info);
-    surface_ = SkSurfaces::WrapBackendRenderTarget(
-        gpu_.get(), rt, kTopLeft_GrSurfaceOrigin,
-        kBGRA_8888_SkColorType, SkColorSpace::MakeSRGB(), nullptr);
-}
-
 void Renderer::shutdown() {
-    surface_ = nullptr;
-    gpu_ = nullptr;
-    metal_layer_ = nullptr;
-    ok_ = false;
-}
-
-static void draw_shelf(SkCanvas* c, const SkRect& bounds, const ItemList& items,
-                       const ThemePalette& p, float time) {
-    SkRRect r = SkRRect::MakeRectXY(bounds, 14, 14);
-
-    SkPaint shadow;
-    shadow.setAntiAlias(true);
-    shadow.setImageFilter(SkImageFilters::Blur(20, 20, nullptr));
-    shadow.setColor(SkColorSetA(p.shadow, 0x60));
-    c->drawRRect(r.makeOffset(0, 4), shadow);
-
-    SkPaint bg;
-    bg.setAntiAlias(true);
-    bg.setColor(SkColorSetA(p.glass_background, 0xCC));
-    c->drawRRect(r, bg);
-
-    SkPaint border;
-    border.setAntiAlias(true);
-    border.setStyle(SkPaint::kStroke_Style);
-    border.setStrokeWidth(0.5f);
-    border.setColor(p.glass_border);
-    c->drawRRect(r, border);
-
-    float x = 12, y = 12;
-    SkFont font(nullptr, 11);
-    SkPaint text;
-    text.setColor(p.text_primary);
-    text.setAntiAlias(true);
-
-    for (size_t i = 0; i < items.size() && i < 20; ++i) {
-        const auto& item = items[i];
-
-        SkRect icon = SkRect::MakeXYWH(x, y, 48, 48);
-        SkRRect icon_r = SkRRect::MakeRectXY(icon, 8, 8);
-
-        SkPaint icon_bg;
-        icon_bg.setAntiAlias(true);
-        icon_bg.setColor((item.data.type == ItemType::Image) ? p.tag_colors[2]
-                       : (item.data.type == ItemType::URL) ? p.tag_colors[3]
-                       : (item.data.type == ItemType::Text) ? p.tag_colors[0]
-                       : p.tag_colors[5]);
-        c->drawRRect(icon_r, icon_bg);
-
-        SkPaint icon_text;
-        icon_text.setAntiAlias(true);
-        icon_text.setColor(SK_ColorWHITE);
-        const char* label = "F";
-        if (item.data.type == ItemType::Image) label = "I";
-        else if (item.data.type == ItemType::URL) label = "U";
-        else if (item.data.type == ItemType::Text) label = "T";
-        else if (item.data.type == ItemType::Folder) label = "D";
-
-        SkFont icon_font(nullptr, 18);
-        SkRect lb;
-        icon_font.measureText(label, 1, SkTextEncoding::kUTF8, &lb);
-        c->drawString(label, icon.centerX() - lb.centerX(), icon.centerY() + 4, icon_font, icon_text);
-
-        std::string name = item.data.file_name.value_or(
-            item.data.title.value_or(
-            item.data.text_content.value_or("")));
-        if (name.size() > 16) { name = name.substr(0, 14); name += "..."; }
-
-        SkRect nb;
-        font.measureText(name.c_str(), name.size(), SkTextEncoding::kUTF8, &nb);
-        float nx = icon.x() + (48 - nb.width()) * 0.5f;
-        c->drawString(name.c_str(), nx, y + 62, font, text);
-
-        x += 64;
+    if (g_view && [g_view conformsToProtocol:@protocol(DDRenderable)]) {
+        id<DDRenderable> rv = (id<DDRenderable>)g_view;
+        rv.ddDrawBlock        = nil;
+        rv.ddHitTestBlock     = nil;
+        rv.ddHandleClickBlock = nil;
+        rv.ddDragOutBlock     = nil;
     }
+    g_view = nil;
+    ok_    = false;
+    g_selectedIndices.clear();
+
+    [g_iconCache       removeAllObjects];
+    [g_thumbCache      removeAllObjects];
+    [g_faviconCache    removeAllObjects];
+    [g_pendingThumbs   removeAllObjects];
+    [g_pendingFavicons removeAllObjects];
 }
 
-void Renderer::render(float dt) {
-    if (!ok_ || !surface_) return;
-    time_ += dt;
+void Renderer::setItems(const ItemList& items) {
+    *shared_items_ = items;
+    g_selectedIndices.clear(); // indices are stale after a list change
+    if (ok_ && g_view) [g_view setNeedsDisplay:YES];
+}
 
-    if (!metal_layer_) return;
-    CAMetalLayer* ml = (__bridge CAMetalLayer*)metal_layer_;
-    id<CAMetalDrawable> drawable = [ml nextDrawable];
-    if (!drawable) return;
+ItemList Renderer::items() const { return *shared_items_; }
 
-    GrMtlTextureInfo info;
-    info.fTexture.retain((__bridge GrMTLHandle)drawable.texture);
-    auto rt = GrBackendRenderTargets::MakeMtl(width_, height_, info);
-    surface_ = SkSurfaces::WrapBackendRenderTarget(
-        gpu_.get(), rt, kTopLeft_GrSurfaceOrigin,
-        kBGRA_8888_SkColorType, SkColorSpace::MakeSRGB(), nullptr);
+void Renderer::setClearCallback(std::function<void()> cb) {
+    *clearCallback_ = std::move(cb);
+}
 
-    SkCanvas* c = surface_->getCanvas();
-    if (!c) return;
-
-    auto& p = Theme::instance().palette();
-    c->clear(p.background);
-
-    SkRect bounds = SkRect::MakeXYWH(4, 4, width_ - 8, height_ - 8);
-    draw_shelf(c, bounds, items_, p, time_);
-
-    gpu_->flush();
-    gpu_->submit();
+void Renderer::render(float) {
+    if (!ok_ || !g_view) return;
+    [g_view setNeedsDisplay:YES];
 }
 
 } // namespace dd

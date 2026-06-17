@@ -2,10 +2,14 @@
 
 #import <Cocoa/Cocoa.h>
 #import <QuartzCore/QuartzCore.h>
+#import "dd_renderable.h"
 
-// ─── ObjC delegates in global scope ───────────────────────────────────────────
+// ─── DDWindowDelegate ─────────────────────────────────────────────────────────
+// Holds all event callbacks and handles NSWindowDelegate notifications.
+// Mouse / key / drag events come through DDDragView (the content view) below;
+// DDDragView forwards them by calling the callbacks stored here.
 
-@interface DDWindowDelegate : NSObject <NSWindowDelegate, NSDraggingDestination>
+@interface DDWindowDelegate : NSObject <NSWindowDelegate>
 @property (nonatomic, copy) void (^onPaint)(void);
 @property (nonatomic, copy) void (^onResize)(int w, int h);
 @property (nonatomic, copy) void (^onMouseDown)(int x, int y, int button);
@@ -16,96 +20,266 @@
 @property (nonatomic, copy) void (^onDragEnter)(int x, int y);
 @property (nonatomic, copy) void (^onDragOver)(int x, int y);
 @property (nonatomic, copy) void (^onDragLeave)(void);
-@property (nonatomic, copy) void (^onDrop)(int x, int y);
+@property (nonatomic, copy) void (^onDrop)(NSArray<NSString*>* items);
 @property (nonatomic, copy) void (^onClose)(void);
 @end
 
 @implementation DDWindowDelegate
 
 - (void)windowDidResize:(NSNotification*)n {
-    if (self.onResize) {
-        NSWindow* w = [n object];
-        NSRect f = [w contentRectForFrameRect:w.frame];
-        self.onResize((int)f.size.width, (int)f.size.height);
-    }
+    if (!self.onResize) return;
+    NSWindow* w = [n object];
+    NSRect f = [w contentRectForFrameRect:w.frame];
+    self.onResize((int)f.size.width, (int)f.size.height);
 }
 
-- (BOOL)windowShouldClose:(NSWindow*)sender { (void)sender; if (self.onClose) self.onClose(); return YES; }
-- (void)windowWillClose:(NSNotification*)n { (void)n; }
-
-- (void)mouseDown:(NSEvent*)e fromWindow:(NSWindow*)w {
-    NSPoint p = [w.contentView convertPoint:e.locationInWindow fromView:nil];
-    if (self.onMouseDown) self.onMouseDown((int)p.x, (int)p.y, (int)e.buttonNumber);
-}
-- (void)mouseUp:(NSEvent*)e fromWindow:(NSWindow*)w {
-    NSPoint p = [w.contentView convertPoint:e.locationInWindow fromView:nil];
-    if (self.onMouseUp) self.onMouseUp((int)p.x, (int)p.y, (int)e.buttonNumber);
-}
-- (void)mouseMoved:(NSEvent*)e fromWindow:(NSWindow*)w {
-    NSPoint p = [w.contentView convertPoint:e.locationInWindow fromView:nil];
-    if (self.onMouseMove) self.onMouseMove((int)p.x, (int)p.y);
-}
-- (void)mouseDragged:(NSEvent*)e fromWindow:(NSWindow*)w { [self mouseMoved:e fromWindow:w]; }
-- (void)rightMouseDown:(NSEvent*)e fromWindow:(NSWindow*)w { [self mouseDown:e fromWindow:w]; }
-- (void)rightMouseUp:(NSEvent*)e fromWindow:(NSWindow*)w { [self mouseUp:e fromWindow:w]; }
-- (void)otherMouseDown:(NSEvent*)e fromWindow:(NSWindow*)w { [self mouseDown:e fromWindow:w]; }
-- (void)otherMouseUp:(NSEvent*)e fromWindow:(NSWindow*)w { [self mouseUp:e fromWindow:w]; }
-
-- (void)keyDown:(NSEvent*)e fromWindow:(NSWindow*)w {
-    (void)w;
-    if (self.onKeyDown) self.onKeyDown((int)e.keyCode, (int)e.modifierFlags);
-}
-- (void)keyUp:(NSEvent*)e fromWindow:(NSWindow*)w {
-    (void)w;
-    if (self.onKeyUp) self.onKeyUp((int)e.keyCode, (int)e.modifierFlags);
-}
-
-- (NSDragOperation)draggingEntered:(id<NSDraggingInfo>)s {
-    NSPoint p = [s draggingLocation];
-    if (self.onDragEnter) self.onDragEnter((int)p.x, (int)p.y);
-    return NSDragOperationCopy;
-}
-- (NSDragOperation)draggingUpdated:(id<NSDraggingInfo>)s {
-    NSPoint p = [s draggingLocation];
-    if (self.onDragOver) self.onDragOver((int)p.x, (int)p.y);
-    return NSDragOperationCopy;
-}
-- (void)draggingExited:(id<NSDraggingInfo>)s { (void)s; if (self.onDragLeave) self.onDragLeave(); }
-- (BOOL)prepareForDragOperation:(id<NSDraggingInfo>)s { (void)s; return YES; }
-- (BOOL)performDragOperation:(id<NSDraggingInfo>)s {
-    NSPoint p = [s draggingLocation];
-    if (self.onDrop) self.onDrop((int)p.x, (int)p.y);
+- (BOOL)windowShouldClose:(NSWindow*)sender {
+    (void)sender;
+    if (self.onClose) self.onClose();
     return YES;
 }
+
+- (void)windowWillClose:(NSNotification*)n { (void)n; }
+
+@end
+
+
+// ─── DDDragView ───────────────────────────────────────────────────────────────
+// The window's content view. Sits in the responder chain so mouse / key / drag
+// events arrive here via the normal Cocoa dispatch mechanism, then get forwarded
+// to DDWindowDelegate's callbacks.
+
+@interface DDDragView : NSView <NSDraggingDestination, NSDraggingSource, DDRenderable>
+@property (nonatomic, weak) DDWindowDelegate* ddDelegate;
+@property (nonatomic, copy, nullable) void (^ddDrawBlock)(CGContextRef ctx, CGRect bounds);
+@property (nonatomic, copy, nullable) BOOL (^ddHitTestBlock)(NSPoint pt);
+@property (nonatomic, copy, nullable) NSArray<NSDraggingItem*>* (^ddDragOutBlock)(NSPoint pt);
+@property (nonatomic, copy, nullable) BOOL (^ddHandleClickBlock)(NSPoint pt);
+@end
+
+@implementation DDDragView {
+    NSPoint _mouseDownPt;     // saved in mouseDown: for drag-gesture detection
+    BOOL    _dragInitiated;   // prevents multiple session starts per gesture
+    BOOL    _mouseDownOnTile; // YES iff mouseDown landed on an item tile
+}
+
+- (BOOL)acceptsFirstResponder { return YES; }
+- (BOOL)isOpaque              { return NO;  }
+// Y=0 at top-left, matching drawShelf's coordinate assumptions.
+- (BOOL)isFlipped             { return YES; }
+
+// Controls whether clicking-and-dragging on this view moves the underlying
+// NSPanel window.  Return NO for tile hits so that gesture goes exclusively
+// to the drag-out session; return YES everywhere else so the shelf can still
+// be repositioned by dragging its background.
+- (BOOL)mouseDownCanMoveWindow {
+    if (!_ddHitTestBlock || !self.window) return YES;
+    NSPoint screenPt = [NSEvent mouseLocation];
+    NSPoint winPt    = [self.window convertPointFromScreen:screenPt];
+    NSPoint viewPt   = [self convertPoint:winPt fromView:nil];
+    return !_ddHitTestBlock(viewPt);
+}
+
+// AppKit calls this with a correctly scaled, flipped CGContext — no manual
+// CGBitmapContext, coordinate transforms, or contentsScale bookkeeping needed.
+- (void)drawRect:(NSRect)dirtyRect {
+    (void)dirtyRect;
+    CGContextRef ctx = (CGContextRef)[[NSGraphicsContext currentContext] CGContext];
+    CGContextClearRect(ctx, NSRectToCGRect(self.bounds));
+    if (_ddDrawBlock) _ddDrawBlock(ctx, NSRectToCGRect(self.bounds));
+}
+
+// ── Mouse ────────────────────────────────────────────────────────────────────
+
+- (void)mouseDown:(NSEvent*)e {
+    NSPoint p = [self convertPoint:e.locationInWindow fromView:nil];
+    // Always reset drag state first — even if we return early below.
+    _mouseDownPt     = p;
+    _dragInitiated   = NO;
+    _mouseDownOnTile = _ddHitTestBlock ? _ddHitTestBlock(p) : NO;
+    // Let the renderer consume special click regions (buttons, etc.).
+    if (_ddHandleClickBlock && _ddHandleClickBlock(p)) return;
+    if (self.ddDelegate.onMouseDown)
+        self.ddDelegate.onMouseDown((int)p.x, (int)p.y, (int)e.buttonNumber);
+}
+- (void)mouseUp:(NSEvent*)e {
+    NSPoint p = [self convertPoint:e.locationInWindow fromView:nil];
+    if (self.ddDelegate.onMouseUp)
+        self.ddDelegate.onMouseUp((int)p.x, (int)p.y, (int)e.buttonNumber);
+}
+- (void)mouseMoved:(NSEvent*)e {
+    NSPoint p = [self convertPoint:e.locationInWindow fromView:nil];
+    if (self.ddDelegate.onMouseMove)
+        self.ddDelegate.onMouseMove((int)p.x, (int)p.y);
+}
+- (void)mouseDragged:(NSEvent*)e {
+    // Only attempt a file drag-out when mouseDown was on an item tile.
+    // If the user dragged from the background, fall through to [super] which
+    // lets the NSPanel's window-moving logic handle it.
+    if (!_dragInitiated && _mouseDownOnTile && _ddDragOutBlock) {
+        NSPoint p = [self convertPoint:e.locationInWindow fromView:nil];
+        if (hypot(p.x - _mouseDownPt.x, p.y - _mouseDownPt.y) > 5.0) {
+            NSArray<NSDraggingItem*>* dragItems = _ddDragOutBlock(_mouseDownPt);
+            if (dragItems.count > 0) {
+                _dragInitiated = YES;
+                // Hide the shelf so it doesn't cover the drop target.
+                // draggingSession:endedAtPoint:operation: will restore it.
+                [self.window orderOut:nil];
+                [self beginDraggingSessionWithItems:dragItems event:e source:self];
+                return;
+            }
+        }
+    }
+    [super mouseDragged:e];
+}
+
+// ── NSDraggingSource ─────────────────────────────────────────────────────────
+
+- (NSDragOperation)draggingSession:(NSDraggingSession*)session
+    sourceOperationMaskForDraggingContext:(NSDraggingContext)context {
+    (void)session; (void)context;
+    return NSDragOperationEvery; // let the destination pick Copy / Move / Link
+}
+- (void)draggingSession:(NSDraggingSession*)session
+         endedAtPoint:(NSPoint)screenPoint
+            operation:(NSDragOperation)operation {
+    (void)session; (void)screenPoint; (void)operation;
+    // Restore the shelf after the drag completes or is cancelled.
+    [self.window orderFrontRegardless];
+}
+- (void)rightMouseDown:(NSEvent*)e    { [self mouseDown:e];  }
+- (void)rightMouseUp:(NSEvent*)e      { [self mouseUp:e];    }
+- (void)otherMouseDown:(NSEvent*)e    { [self mouseDown:e];  }
+- (void)otherMouseUp:(NSEvent*)e      { [self mouseUp:e];    }
+
+// ── Keyboard ─────────────────────────────────────────────────────────────────
+
+- (void)keyDown:(NSEvent*)e {
+    if (self.ddDelegate.onKeyDown)
+        self.ddDelegate.onKeyDown((int)e.keyCode, (int)e.modifierFlags);
+}
+- (void)keyUp:(NSEvent*)e {
+    if (self.ddDelegate.onKeyUp)
+        self.ddDelegate.onKeyUp((int)e.keyCode, (int)e.modifierFlags);
+}
+
+// ── NSDraggingDestination ─────────────────────────────────────────────────────
+
+- (NSDragOperation)draggingEntered:(id<NSDraggingInfo>)s {
+    NSPoint p = [self convertPoint:[s draggingLocation] fromView:nil];
+    if (self.ddDelegate.onDragEnter)
+        self.ddDelegate.onDragEnter((int)p.x, (int)p.y);
+    return NSDragOperationCopy;
+}
+
+- (NSDragOperation)draggingUpdated:(id<NSDraggingInfo>)s {
+    NSPoint p = [self convertPoint:[s draggingLocation] fromView:nil];
+    if (self.ddDelegate.onDragOver)
+        self.ddDelegate.onDragOver((int)p.x, (int)p.y);
+    return NSDragOperationCopy;
+}
+
+- (void)draggingExited:(id<NSDraggingInfo>)s {
+    (void)s;
+    if (self.ddDelegate.onDragLeave) self.ddDelegate.onDragLeave();
+}
+
+- (BOOL)prepareForDragOperation:(id<NSDraggingInfo>)s { (void)s; return YES; }
+
+- (BOOL)performDragOperation:(id<NSDraggingInfo>)s {
+    NSPasteboard* pb = [s draggingPasteboard];
+    NSMutableArray<NSString*>* items = [NSMutableArray array];
+
+    // 1. File URLs — highest priority
+    NSArray<NSURL*>* fileURLs = [pb readObjectsForClasses:@[[NSURL class]]
+        options:@{NSPasteboardURLReadingFileURLsOnlyKey: @YES}];
+    for (NSURL* url in fileURLs) {
+        if (url.isFileURL) [items addObject:url.path];
+    }
+
+    // 2. Web / generic URLs (only if no file paths were found)
+    if (items.count == 0) {
+        NSArray<NSURL*>* urls = [pb readObjectsForClasses:@[[NSURL class]] options:@{}];
+        for (NSURL* url in urls) {
+            if (!url.isFileURL) [items addObject:url.absoluteString];
+        }
+    }
+
+    // 3. Plain text
+    if (items.count == 0) {
+        NSString* str = [pb stringForType:NSPasteboardTypeString];
+        if (str.length > 0) [items addObject:str];
+    }
+
+    // 4. Dropped image → write to a uniquely-named temp PNG
+    if (items.count == 0) {
+        NSImage* img = [[NSImage alloc] initWithPasteboard:pb];
+        if (img) {
+            NSBitmapImageRep* rep =
+                [NSBitmapImageRep imageRepWithData:img.TIFFRepresentation];
+            NSData* png = [rep representationUsingType:NSBitmapImageFileTypePNG
+                                             properties:@{}];
+            if (png) {
+                NSString* tmp = [[NSTemporaryDirectory()
+                    stringByAppendingPathComponent:[[NSUUID UUID] UUIDString]]
+                    stringByAppendingPathExtension:@"png"];
+                if ([png writeToFile:tmp atomically:YES])
+                    [items addObject:tmp];
+            }
+        }
+    }
+
+    if (self.ddDelegate.onDrop) self.ddDelegate.onDrop(items);
+    return items.count > 0;
+}
+
 - (void)concludeDragOperation:(id<NSDraggingInfo>)s { (void)s; }
 
 @end
 
+
+// ─── DDWindow ─────────────────────────────────────────────────────────────────
+
 @interface DDWindow : NSPanel
 - (instancetype)initWithStyle:(dd::WindowStyle)style;
-@property (nonatomic, assign, readonly) dd::WindowStyle style;
+@property (nonatomic, assign, readonly) dd::WindowStyle ddStyle;
+@property (nonatomic, strong, readonly) DDWindowDelegate* ddDelegate;
 @end
 
 @implementation DDWindow {
     DDWindowDelegate* _ddDelegate;
-    NSTrackingArea* _trackingArea;
-    dd::WindowStyle _style;
+    NSTrackingArea*   _trackingArea;
+    dd::WindowStyle   _ddStyle;
 }
 
 - (instancetype)initWithStyle:(dd::WindowStyle)style {
     NSRect frame = NSMakeRect(100, 100, 400, 120);
-    NSWindowStyleMask mask = NSWindowStyleMaskBorderless;
-    if (style == dd::WindowStyle::Normal) mask = NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskResizable;
+    const BOOL isShelf = (style != dd::WindowStyle::Normal);
 
-    self = [super initWithContentRect:frame styleMask:mask backing:NSBackingStoreBuffered defer:NO];
+    // Non-activating mask so the panel never steals focus from the active app.
+    NSWindowStyleMask mask = isShelf
+        ? (NSWindowStyleMaskBorderless | NSWindowStyleMaskNonactivatingPanel)
+        : (NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskResizable);
+
+    self = [super initWithContentRect:frame styleMask:mask
+                              backing:NSBackingStoreBuffered defer:NO];
     if (!self) return nil;
 
-    _style = style;
+    _ddStyle   = style;
     _ddDelegate = [[DDWindowDelegate alloc] init];
     [self setDelegate:_ddDelegate];
 
-    [self setLevel:NSFloatingWindowLevel];
-    [self setCollectionBehavior:NSWindowCollectionBehaviorCanJoinAllSpaces | NSWindowCollectionBehaviorStationary];
+    if (isShelf) {
+        // Float above normal windows.
+        [self setLevel:NSFloatingWindowLevel];
+        // Stay visible even when the application deactivates.
+        [self setHidesOnDeactivate:NO];
+        // Follow the user across all Spaces; don't appear in Mission Control.
+        [self setCollectionBehavior:
+            NSWindowCollectionBehaviorCanJoinAllSpaces |
+            NSWindowCollectionBehaviorTransient];
+    }
+
     [self setHasShadow:YES];
     [self setOpaque:NO];
     [self setBackgroundColor:[NSColor clearColor]];
@@ -113,71 +287,98 @@
     if (style == dd::WindowStyle::Frameless || style == dd::WindowStyle::Transparent) {
         [self setTitlebarAppearsTransparent:YES];
         [self setTitleVisibility:NSWindowTitleHidden];
-        [self standardWindowButton:NSWindowCloseButton].hidden = YES;
-        [self standardWindowButton:NSWindowMiniaturizeButton].hidden = YES;
-        [self standardWindowButton:NSWindowZoomButton].hidden = YES;
+        [[self standardWindowButton:NSWindowCloseButton]      setHidden:YES];
+        [[self standardWindowButton:NSWindowMiniaturizeButton] setHidden:YES];
+        [[self standardWindowButton:NSWindowZoomButton]        setHidden:YES];
     }
 
-    self.contentView.wantsLayer = YES;
-    self.contentView.layer.opaque = NO;
+    // DDDragView IS the content view. It implements NSDraggingDestination so
+    // the system delivers drag events to it directly (view-level registration
+    // survives any later changes to the layer hierarchy made by the renderer).
+    DDDragView* dragView = [[DDDragView alloc] initWithFrame:frame];
+    dragView.ddDelegate  = _ddDelegate;
+    dragView.wantsLayer  = YES;
+    dragView.layer.opaque = NO;
+    dragView.layer.backgroundColor = [[NSColor clearColor] CGColor];
+    dragView.layer.cornerRadius  = 14;
+    dragView.layer.masksToBounds = YES;
+    [self setContentView:dragView];
+    [self makeFirstResponder:dragView];
 
-    _trackingArea = [[NSTrackingArea alloc] initWithRect:frame
-                                                 options:NSTrackingMouseMoved | NSTrackingActiveAlways | NSTrackingInVisibleRect
-                                                   owner:_ddDelegate
-                                                userInfo:nil];
-    [self.contentView addTrackingArea:_trackingArea];
-
-    [self registerForDraggedTypes:@[
+    // Register drag types on the VIEW, not the window.
+    [dragView registerForDraggedTypes:@[
         NSPasteboardTypeFileURL,
         NSPasteboardTypeURL,
         NSPasteboardTypeString,
         NSPasteboardTypeHTML,
         NSPasteboardTypeTIFF,
-        NSPasteboardTypePNG
+        NSPasteboardTypePNG,
     ]];
+
+    // Tracking area for mouseMoved: events.
+    _trackingArea = [[NSTrackingArea alloc]
+        initWithRect:frame
+             options:NSTrackingMouseMoved | NSTrackingActiveAlways | NSTrackingInVisibleRect
+               owner:dragView
+            userInfo:nil];
+    [dragView addTrackingArea:_trackingArea];
 
     return self;
 }
 
-- (BOOL)canBecomeKeyWindow { return YES; }
+- (BOOL)canBecomeKeyWindow  { return YES; }
 - (BOOL)canBecomeMainWindow { return YES; }
 - (BOOL)isMovableByWindowBackground { return YES; }
 
+- (dd::WindowStyle)ddStyle    { return _ddStyle;    }
 - (DDWindowDelegate*)ddDelegate { return _ddDelegate; }
 
 @end
 
-// ─── C++ anonymous namespace ─────────────────────────────────────────────────
+
+// ─── C++ helpers ──────────────────────────────────────────────────────────────
 
 namespace {
 
-void setDelegateCallbacksFromWindow(DDWindow* w,
-    dd::PaintCallback paintCb, dd::ResizeCallback resizeCb,
-    dd::MouseCallback mouseDownCb, dd::MouseCallback mouseUpCb,
-    dd::MouseMoveCallback mouseMoveCb,
-    dd::KeyCallback keyDownCb, dd::KeyCallback keyUpCb,
-    dd::WindowDragEnterCallback dragEnterCb, dd::WindowDragOverCallback dragOverCb,
-    dd::WindowDragLeaveCallback dragLeaveCb, dd::WindowDropCallback dropCb,
-    dd::CloseCallback closeCb)
+void wireCallbacks(DDWindow* w,
+    dd::PaintCallback            paintCb,
+    dd::ResizeCallback           resizeCb,
+    dd::MouseCallback            mouseDownCb,
+    dd::MouseCallback            mouseUpCb,
+    dd::MouseMoveCallback        mouseMoveCb,
+    dd::KeyCallback              keyDownCb,
+    dd::KeyCallback              keyUpCb,
+    dd::WindowDragEnterCallback  dragEnterCb,
+    dd::WindowDragOverCallback   dragOverCb,
+    dd::WindowDragLeaveCallback  dragLeaveCb,
+    dd::WindowDropCallback       dropCb,
+    dd::CloseCallback            closeCb)
 {
-    DDWindowDelegate* d = [w ddDelegate];
-    d.onResize = [=](int w_, int h_) { if (resizeCb) resizeCb(w_, h_); };
+    DDWindowDelegate* d = w.ddDelegate;
+    d.onResize    = [=](int w_, int h_) { if (resizeCb)    resizeCb(w_, h_); };
     d.onMouseDown = [=](int x, int y, int b) { if (mouseDownCb) mouseDownCb(x, y, static_cast<dd::MouseButton>(b)); };
-    d.onMouseUp = [=](int x, int y, int b) { if (mouseUpCb) mouseUpCb(x, y, static_cast<dd::MouseButton>(b)); };
-    d.onMouseMove = [=](int x, int y) { if (mouseMoveCb) mouseMoveCb(x, y); };
-    d.onKeyDown = [=](int k, int m) { if (keyDownCb) keyDownCb(k, m); };
-    d.onKeyUp = [=](int k, int m) { if (keyUpCb) keyUpCb(k, m); };
-    d.onDragEnter = [=](int x, int y) { if (dragEnterCb) dragEnterCb(x, y); };
-    d.onDragOver = [=](int x, int y) { if (dragOverCb) dragOverCb(x, y); };
-    d.onDragLeave = [=]() { if (dragLeaveCb) dragLeaveCb(); };
-    d.onDrop = [=](int x, int y) { if (dropCb) dropCb(x, y); };
+    d.onMouseUp   = [=](int x, int y, int b) { if (mouseUpCb)   mouseUpCb  (x, y, static_cast<dd::MouseButton>(b)); };
+    d.onMouseMove = [=](int x, int y)        { if (mouseMoveCb) mouseMoveCb(x, y); };
+    d.onKeyDown   = [=](int k, int m)        { if (keyDownCb)   keyDownCb(k, m);   };
+    d.onKeyUp     = [=](int k, int m)        { if (keyUpCb)     keyUpCb(k, m);     };
+    d.onDragEnter = [=](int x, int y)        { if (dragEnterCb) dragEnterCb(x, y); };
+    d.onDragOver  = [=](int x, int y)        { if (dragOverCb)  dragOverCb(x, y);  };
+    d.onDragLeave = [=]()                    { if (dragLeaveCb) dragLeaveCb();      };
+    d.onDrop      = [=](NSArray<NSString*>* files) {
+        if (!dropCb) return;
+        std::vector<std::string> paths;
+        paths.reserve(files.count);
+        for (NSString* p in files) paths.emplace_back(p.UTF8String);
+        dropCb(std::move(paths));
+    };
     d.onClose = [=]() { if (closeCb) closeCb(); };
     (void)paintCb;
 }
 
 } // anonymous namespace
 
-// ─── DDMacWindow (C++ implementation) ────────────────────────────────────────
+
+// ─── DDMacWindow (C++ NativeWindow implementation) ────────────────────────────
 
 namespace dd {
 
@@ -186,62 +387,102 @@ public:
     explicit DDMacWindow(WindowStyle style)
         : window_([[DDWindow alloc] initWithStyle:style])
     {
-        setDelegateCallbacksFromWindow(
-            window_, paintCallback_, resizeCallback_,
+        wireCallbacks(window_,
+            paintCallback_,  resizeCallback_,
             mouseDownCallback_, mouseUpCallback_, mouseMoveCallback_,
-            keyDownCallback_, keyUpCallback_,
-            dragEnterCallback_, dragOverCallback_, dragLeaveCallback_, dropCallback_,
-            closeCallback_
-        );
+            keyDownCallback_,   keyUpCallback_,
+            dragEnterCallback_, dragOverCallback_, dragLeaveCallback_,
+            dropCallback_, closeCallback_);
     }
 
     ~DDMacWindow() override { close(); }
 
-    void show() override { [window_ makeKeyAndOrderFront:nil]; }
+    // Use orderFrontRegardless so the window surfaces even when the app is in
+    // the background (e.g. triggered by a global hotkey while Finder is active).
+    void show() override { [window_ orderFrontRegardless]; }
     void hide() override { [window_ orderOut:nil]; }
     void close() override { [window_ close]; }
-    void setBounds(int x, int y, int w, int h) override { [window_ setFrame:NSMakeRect(x, y, w, h) display:YES]; }
+
+    void setBounds(int x, int y, int w, int h) override {
+        [window_ setFrame:NSMakeRect(x, y, w, h) display:YES];
+    }
     Rect getBounds() const override {
         NSRect r = window_.frame;
-        return {static_cast<int>(r.origin.x), static_cast<int>(r.origin.y),
-                static_cast<int>(r.size.width), static_cast<int>(r.size.height)};
+        return { static_cast<int>(r.origin.x),    static_cast<int>(r.origin.y),
+                 static_cast<int>(r.size.width),   static_cast<int>(r.size.height) };
     }
-    void setAlwaysOnTop(bool e) override { [window_ setLevel:e ? NSFloatingWindowLevel : NSNormalWindowLevel]; }
+
+    void setAlwaysOnTop(bool e) override {
+        [window_ setLevel:e ? NSFloatingWindowLevel : NSNormalWindowLevel];
+    }
     void setTransparency(float a) override { window_.alphaValue = a; }
-    void setVisible(bool v) override { v ? [window_ orderFront:nil] : [window_ orderOut:nil]; }
+    void setVisible(bool v) override {
+        v ? [window_ orderFrontRegardless] : [window_ orderOut:nil];
+    }
     bool isVisible() const override { return window_.isVisible; }
-    void setTitle(std::string_view t) override { window_.title = [NSString stringWithUTF8String:t.data()]; }
-    void minimize() override { [window_ miniaturize:nil]; }
-    void restore() override { [window_ deminiaturize:nil]; }
+    void setTitle(std::string_view t) override {
+        window_.title = [NSString stringWithUTF8String:t.data()];
+    }
+    void minimize() override  { [window_ miniaturize:nil]; }
+    void restore() override   { [window_ deminiaturize:nil]; }
     void* nativeHandle() const override { return (__bridge void*)window_.contentView; }
 
-    void setPaintCallback(PaintCallback cb) override { paintCallback_ = std::move(cb); }
-    void setResizeCallback(ResizeCallback cb) override { resizeCallback_ = std::move(cb); }
-    void setMouseDownCallback(MouseCallback cb) override { mouseDownCallback_ = std::move(cb); }
-    void setMouseMoveCallback(MouseMoveCallback cb) override { mouseMoveCallback_ = std::move(cb); }
-    void setMouseUpCallback(MouseCallback cb) override { mouseUpCallback_ = std::move(cb); }
-    void setKeyDownCallback(KeyCallback cb) override { keyDownCallback_ = std::move(cb); }
-    void setKeyUpCallback(KeyCallback cb) override { keyUpCallback_ = std::move(cb); }
+    void setPaintCallback(PaintCallback cb)              override { paintCallback_     = std::move(cb); }
+    void setResizeCallback(ResizeCallback cb)            override { resizeCallback_    = std::move(cb); }
+    void setMouseDownCallback(MouseCallback cb)          override { mouseDownCallback_ = std::move(cb); }
+    void setMouseMoveCallback(MouseMoveCallback cb)      override { mouseMoveCallback_ = std::move(cb); }
+    void setMouseUpCallback(MouseCallback cb)            override { mouseUpCallback_   = std::move(cb); }
+    void setKeyDownCallback(KeyCallback cb)              override { keyDownCallback_   = std::move(cb); }
+    void setKeyUpCallback(KeyCallback cb)                override { keyUpCallback_     = std::move(cb); }
     void setDragEnterCallback(WindowDragEnterCallback cb) override { dragEnterCallback_ = std::move(cb); }
-    void setDragOverCallback(WindowDragOverCallback cb) override { dragOverCallback_ = std::move(cb); }
+    void setDragOverCallback(WindowDragOverCallback cb)  override { dragOverCallback_  = std::move(cb); }
     void setDragLeaveCallback(WindowDragLeaveCallback cb) override { dragLeaveCallback_ = std::move(cb); }
-    void setDropCallback(WindowDropCallback cb) override { dropCallback_ = std::move(cb); }
-    void setCloseCallback(CloseCallback cb) override { closeCallback_ = std::move(cb); }
+    void setDropCallback(WindowDropCallback cb) override {
+        dropCallback_ = std::move(cb);
+        // wireCallbacks captured callbacks by value at construction time (when
+        // they were empty). Re-wire onDrop now so it reads dropCallback_ through
+        // `this` at call time, picking up whatever was set most recently.
+        // Capturing `this` is safe: the delegate is owned by the DDWindow which
+        // is owned by this DDMacWindow — the block cannot outlive us.
+        window_.ddDelegate.onDrop = ^(NSArray<NSString*>* files) {
+            if (!this->dropCallback_) return;
+            std::vector<std::string> paths;
+            paths.reserve(files.count);
+            for (NSString* p in files) paths.emplace_back(p.UTF8String);
+            this->dropCallback_(std::move(paths));
+        };
+    }
+    void setCloseCallback(CloseCallback cb)              override { closeCallback_     = std::move(cb); }
+
+    void positionNearCursor(int w, int h) override {
+        NSPoint cursor = [NSEvent mouseLocation];
+        NSScreen* screen = [NSScreen mainScreen] ?: [[NSScreen screens] firstObject];
+        NSRect sf = screen ? screen.visibleFrame : NSMakeRect(0, 0, 1440, 900);
+        // Center shelf on cursor X; place just above cursor.
+        int x = static_cast<int>(cursor.x) - w / 2;
+        int y = static_cast<int>(cursor.y) + 20;
+        // Clamp so the shelf stays fully on screen.
+        x = std::max((int)sf.origin.x,
+                std::min(x, (int)(sf.origin.x + sf.size.width  - w)));
+        y = std::max((int)sf.origin.y,
+                std::min(y, (int)(sf.origin.y + sf.size.height - h)));
+        [window_ setFrame:NSMakeRect(x, y, w, h) display:YES];
+    }
 
 private:
-    DDWindow* window_;
-    PaintCallback paintCallback_;
-    ResizeCallback resizeCallback_;
-    MouseCallback mouseDownCallback_;
-    MouseCallback mouseUpCallback_;
-    MouseMoveCallback mouseMoveCallback_;
-    KeyCallback keyDownCallback_;
-    KeyCallback keyUpCallback_;
-    WindowDragEnterCallback dragEnterCallback_;
-    WindowDragOverCallback dragOverCallback_;
-    WindowDragLeaveCallback dragLeaveCallback_;
-    WindowDropCallback dropCallback_;
-    CloseCallback closeCallback_;
+    DDWindow*                window_;
+    PaintCallback            paintCallback_;
+    ResizeCallback           resizeCallback_;
+    MouseCallback            mouseDownCallback_;
+    MouseCallback            mouseUpCallback_;
+    MouseMoveCallback        mouseMoveCallback_;
+    KeyCallback              keyDownCallback_;
+    KeyCallback              keyUpCallback_;
+    WindowDragEnterCallback  dragEnterCallback_;
+    WindowDragOverCallback   dragOverCallback_;
+    WindowDragLeaveCallback  dragLeaveCallback_;
+    WindowDropCallback       dropCallback_;
+    CloseCallback            closeCallback_;
 };
 
 std::unique_ptr<NativeWindow> NativeWindow::create(WindowStyle style) {
