@@ -213,6 +213,7 @@ public:
     void setTitle(std::string_view t) override { window_.title = [NSString stringWithUTF8String:t.data()]; }
     void minimize() override { [window_ miniaturize:nil]; }
     void restore() override { [window_ deminiaturize:nil]; }
+    void* nativeHandle() const override { return (__bridge void*)window_.contentView; }
 
     void setPaintCallback(PaintCallback cb) override { paintCallback_ = std::move(cb); }
     void setResizeCallback(ResizeCallback cb) override { resizeCallback_ = std::move(cb); }

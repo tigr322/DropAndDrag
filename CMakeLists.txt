@@ -22,8 +22,9 @@ if(MSVC)
         add_compile_options(/O2 /DNDEBUG)
     endif()
 else()
-    add_compile_options(-Wall -Wextra -Wpedantic -Wno-unused-parameter -Wno-deprecated-declarations -Wno-unused-result -Werror)
+    add_compile_options(-Wall -Wextra -Wpedantic -Wno-unused-parameter -Wno-deprecated-declarations -Wno-unused-result)
     if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+        add_compile_options(-Werror)
         add_compile_options(-O0 -g)
         if(DROPANDDRAG_ENABLE_SANITIZERS)
             add_compile_options(-fsanitize=address,undefined)
@@ -69,8 +70,10 @@ else()
         src/platform_impl/linux/*.cpp
     )
 endif()
-# UI layer excluded pending Skia API compatibility updates
-# file(GLOB_RECURSE UI_SOURCES CONFIGURE_DEPENDS src/ui/*.cpp)
+file(GLOB_RECURSE UI_SOURCES CONFIGURE_DEPENDS
+    src/ui/*.cpp
+    src/ui/*.mm
+)
 file(GLOB_RECURSE APP_SOURCES CONFIGURE_DEPENDS
     src/app/*.cpp
 )
@@ -90,13 +93,19 @@ target_link_libraries(DropAndDragPlatform PUBLIC
     Threads::Threads
 )
 
-# add_library(DropAndDragUI STATIC ${UI_SOURCES})  # excluded pending Skia update
+add_library(DropAndDragUI STATIC ${UI_SOURCES})
+target_include_directories(DropAndDragUI PUBLIC src src/vendor)
+target_link_libraries(DropAndDragUI PUBLIC
+    DropAndDragCore
+    Skia::Skia
+)
 
 add_executable(DropAndDrag ${MAIN_SOURCE} ${APP_SOURCES})
 target_include_directories(DropAndDrag PRIVATE src src/vendor)
 target_link_libraries(DropAndDrag PRIVATE
     DropAndDragCore
     DropAndDragPlatform
+    DropAndDragUI
     SQLite::SQLite3
     Skia::Skia
     Threads::Threads

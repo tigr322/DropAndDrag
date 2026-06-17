@@ -14,13 +14,15 @@
 #include <platform/fs_monitor/fs_monitor.hpp>
 #include <platform/hotkeys/hotkeys.hpp>
 #include <platform/mouse_monitor/mouse_monitor.hpp>
+#include <platform/native_app.hpp>
 #include <platform/notifications/notifications.hpp>
 #include <platform/tray/tray.hpp>
 #include <platform/window/native_window.hpp>
 #include <platform/window/window_manager.hpp>
+#include <ui/renderer.hpp>
 // UI includes excluded pending Skia update
 // #include <ui/animations/animation.hpp>
-// #include <ui/renderer/renderer.hpp>
+// #include <ui/renderer.hpp>
 // #include <ui/themes/theme.hpp>
 
 #include <chrono>
@@ -199,7 +201,7 @@ bool Application::init(int argc, char* argv[]) {
         log_message("WARN", "Mouse shake detection unavailable (needs accessibility permission)");
     }
 
-    // init_ui disabled pending Skia API update
+    // init_ui
     if (!init_ui()) {
         log_message("WARN", "UI not available");
     }
@@ -327,13 +329,15 @@ bool Application::init_threading() {
 }
 
 bool Application::init_platform() {
-    native_window_ = NativeWindow::create(WindowStyle::Normal);
+    native_window_ = NativeWindow::create(WindowStyle::Transparent);
     window_manager_ = std::make_unique<WindowManager>();
 
     // hotkey_manager_ via instance()
 
     auto cfg = settings_->get();
     // system_tray_ via instance()
+
+    init_native_app();
 
     return true;
 }
@@ -346,8 +350,8 @@ bool Application::init_mouse_shake() {
     shake_detector_ = std::make_unique<MouseShakeDetector>(shake_cfg);
 
     shake_detector_->set_callback([this]() {
-        event_bus_->emit(EventType::ShelfShown);
         log_message("INFO", "Mouse shake detected — opening shelf");
+        native_window_->show();
     });
 
     if (!start_mouse_monitor(*shake_detector_)) {
@@ -360,7 +364,56 @@ bool Application::init_mouse_shake() {
 }
 
 bool Application::init_ui() {
-    log_message("INFO", "UI layer disabled (Skia API pending)");
+    int width = settings_->shelf_position_width();
+    int height = settings_->shelf_position_height();
+    if (width < 100) width = 400;
+    if (height < 60) height = 120;
+
+    renderer_ = std::make_unique<Renderer>();
+    void* view = native_window_ ? native_window_->nativeHandle() : nullptr;
+    if (!renderer_->init(view, width, height)) {
+        log_message("ERROR", "Failed to init renderer");
+        return false;
+    }
+
+    native_window_->setAlwaysOnTop(true);
+    native_window_->setTransparency(0.95f);
+
+    int screen_w = 1440, screen_h = 900;
+    int shelf_x = (screen_w - width) / 2;
+    int shelf_y = screen_h - height - 60;
+    native_window_->setBounds(shelf_x, shelf_y, width, height);
+
+    ItemList test_items;
+    {
+        Item f;
+        f.data.uuid = "1"; f.data.type = ItemType::File;
+        f.data.file_name = "document.pdf"; f.data.file_size = 2048000;
+        test_items.push_back(std::move(f));
+    }
+    {
+        Item f;
+        f.data.uuid = "2"; f.data.type = ItemType::Image;
+        f.data.file_name = "photo.jpg"; f.data.file_size = 5140000;
+        test_items.push_back(std::move(f));
+    }
+    {
+        Item f;
+        f.data.uuid = "3"; f.data.type = ItemType::URL;
+        f.data.url = "https://github.com"; f.data.title = "GitHub";
+        test_items.push_back(std::move(f));
+    }
+    {
+        Item f;
+        f.data.uuid = "4"; f.data.type = ItemType::Text;
+        f.data.text_content = "The quick brown fox";
+        test_items.push_back(std::move(f));
+    }
+    renderer_->setItems(test_items);
+
+    native_window_->show();
+
+    log_message("INFO", "UI initialized");
     return true;
 }
 
@@ -370,8 +423,10 @@ void Application::wire_event_bus() {
         auto hkdef = HotkeyManager::parseHotkeyString(new_settings.global_hotkey);
         if (hkdef) HotkeyManager::instance().registerHotkey(hkdef->modifiers, hkdef->key_code);
 
-        // Theme disabled — UI pending
-        // Theme::setVariant(...)
+        auto& theme = Theme::instance();
+        if (new_settings.theme == "dark") theme.setVariant(ThemeVariant::Dark);
+        else if (new_settings.theme == "light") theme.setVariant(ThemeVariant::Light);
+        else theme.detectSystemTheme();
     });
 }
 
@@ -411,8 +466,13 @@ void Application::cleanup_signal_handlers() {
 #if defined(__APPLE__)
 int Application::run_cocoa_loop() {
     log_message("INFO", "Entering Cocoa run loop");
+
+    auto& tray = SystemTray::instance();
+    tray.show();
+
     while (running_.load(std::memory_order_acquire)) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(16));
+        native_loop_step();
+        if (renderer_) renderer_->render(16.67f);
     }
     log_message("INFO", "Exiting Cocoa run loop");
     return EXIT_SUCCESS;

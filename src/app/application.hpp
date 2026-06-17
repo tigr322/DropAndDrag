@@ -17,6 +17,7 @@ class WindowManager;
 class NativeWindow;
 class Database;
 class MouseShakeDetector;
+class Renderer;
 
 class Application {
 public:
@@ -72,6 +73,8 @@ private:
 
     std::unique_ptr<NativeWindow> native_window_;
     std::unique_ptr<WindowManager> window_manager_;
+
+    std::unique_ptr<Renderer> renderer_;
 
     std::unique_ptr<MouseShakeDetector> shake_detector_;
 

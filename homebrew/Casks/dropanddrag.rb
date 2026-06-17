@@ -1,14 +1,14 @@
 cask "dropanddrag" do
   version "1.0.0"
-  sha256 arm:   "bc8fa302465815d7f38f588ee7b9f9062feeee1f3e94040bf49cfdb6a7123375",
+  sha256 arm:   "f5cd9d85135fa3cc59044b628a55b11e4331362fcb107a8593d41f80d1ca2ddb",
          intel: "PLACEHOLDER_X64_SHA256"
 
-  url "https://github.com/tigr322/DropAndDrag/releases/download/v#{version}/DropAndDrag-#{version}.dmg"
+  url "https://github.com/tigr322/DropAndDrag/releases/download/v#{version}/DropAndDrag-#{version}-macOS.dmg"
   name "DropAndDrag"
   desc "Fast cross-platform drag-and-drop shelf utility"
   homepage "https://github.com/tigr322/DropAndDrag"
 
-  depends_on macos: ">= :ventura"
+  depends_on macos: :ventura
 
   app "DropAndDrag.app"
 

@@ -55,6 +55,7 @@ public:
     virtual void setTitle(std::string_view title) = 0;
     virtual void minimize() = 0;
     virtual void restore() = 0;
+    virtual void* nativeHandle() const = 0;
 
     virtual void setPaintCallback(PaintCallback cb) = 0;
     virtual void setResizeCallback(ResizeCallback cb) = 0;
