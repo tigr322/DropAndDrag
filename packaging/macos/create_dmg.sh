@@ -11,7 +11,8 @@ SRC_DIR="$(dirname "$0")/../.."
 
 echo "=== Building ${APP_NAME} v${VERSION} ==="
 
-cmake -S "${SRC_DIR}" -B "${BUILD_DIR}" -DCMAKE_BUILD_TYPE=Release -G Ninja
+SKIA_DIR="${SKIA_DIR:-$HOME/skia}"
+cmake -S "${SRC_DIR}" -B "${BUILD_DIR}" -DCMAKE_BUILD_TYPE=Release -G Ninja -DSKIA_DIR="${SKIA_DIR}"
 cmake --build "${BUILD_DIR}" --config Release --target DropAndDrag
 
 echo "=== Creating .app bundle ==="
