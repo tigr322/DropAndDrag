@@ -12,6 +12,11 @@ cask "dropanddrag" do
 
   app "DropAndDrag.app"
 
+  postflight do
+    system_command "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister",
+                   args: ["-f", "#{appdir}/DropAndDrag.app"]
+  end
+
   zap trash: [
     "~/Library/Application Support/DropAndDrag",
     "~/Library/Preferences/com.dropanddrag.app.plist",

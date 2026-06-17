@@ -160,8 +160,15 @@ if(APPLE)
         COMMAND mkdir -p "$<TARGET_BUNDLE_CONTENT_DIR:DropAndDrag>/Resources"
         COMMAND cp "${CMAKE_CURRENT_SOURCE_DIR}/resources/icons/icon.icns" "$<TARGET_BUNDLE_CONTENT_DIR:DropAndDrag>/Resources/icon.icns"
         COMMAND codesign --force --deep --sign - "$<TARGET_BUNDLE_DIR:DropAndDrag>"
+        COMMAND ${CMAKE_COMMAND} -E echo "  Signed: ad-hoc (for Developer ID, set DEVELOPER_ID in env)"
         COMMENT "Copying app icon + ad-hoc signing"
     )
+    if(DEFINED ENV{DEVELOPER_ID})
+        add_custom_command(TARGET DropAndDrag POST_BUILD
+            COMMAND codesign --force --deep --sign "$ENV{DEVELOPER_ID}" --options runtime --timestamp "$<TARGET_BUNDLE_DIR:DropAndDrag>"
+            COMMENT "Signing with Developer ID: $ENV{DEVELOPER_ID}"
+        )
+    endif()
 elseif(WIN32)
     target_link_libraries(DropAndDragPlatform PRIVATE
         dwmapi
