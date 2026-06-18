@@ -1,3 +1,5 @@
+// tag.cpp — In-memory TagStore (shared_mutex, same pattern as ItemStore).
+
 #include "tag.hpp"
 
 #include <shared_mutex>

@@ -1,3 +1,5 @@
+// clipboard_win.cpp — Windows clipboard stub (OpenClipboard/SetClipboardData implementation pending).
+
 #include "platform/clipboard/clipboard.hpp"
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX

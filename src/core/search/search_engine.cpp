@@ -1,3 +1,9 @@
+// search_engine.cpp — Full-text search backed by SQLite FTS5.
+//
+// Queries the search_index virtual table created by migrations v1.
+// The index is kept up-to-date automatically via INSERT/UPDATE/DELETE triggers
+// on the items table (defined in migrations.cpp).
+
 #include "search_engine.hpp"
 
 #include <sqlite3.h>

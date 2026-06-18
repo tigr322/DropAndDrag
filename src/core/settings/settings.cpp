@@ -1,3 +1,12 @@
+// settings.cpp — Thread-safe JSON settings persistence.
+//
+// Reads and writes are guarded by a shared_mutex (shared for reads, exclusive
+// for writes) so the UI thread can read settings while a background thread
+// writes them without data races.
+//
+// set() auto-saves to the last path passed to load(); if load() has not been
+// called, changes live only in memory until save() is called explicitly.
+
 #include "settings.hpp"
 
 #include <fstream>

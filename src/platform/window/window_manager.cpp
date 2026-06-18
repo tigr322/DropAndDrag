@@ -1,3 +1,6 @@
+// window_manager.cpp — WindowManager: tracks open NativeWindow instances,
+// dispatches show/hide/focus, and handles z-order policy (always-on-top).
+
 #include "window_manager.hpp"
 
 #include <algorithm>

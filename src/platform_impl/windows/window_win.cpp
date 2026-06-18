@@ -1,3 +1,5 @@
+// window_win.cpp — Windows NativeWindow stub (Win32 WS_EX_LAYERED implementation pending).
+
 #include "platform/window/native_window.hpp"
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX

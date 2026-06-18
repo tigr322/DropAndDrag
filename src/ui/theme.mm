@@ -1,3 +1,6 @@
+// theme.mm — Theme: reads macOS effective appearance to resolve auto theme.
+// Resolves Theme::Auto → Dark/Light by querying [NSApp effectiveAppearance].
+
 #include "theme.hpp"
 #import <Foundation/Foundation.h>
 

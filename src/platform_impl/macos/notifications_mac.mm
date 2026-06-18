@@ -1,3 +1,8 @@
+// notifications_mac.mm — macOS Notifications via UNUserNotificationCenter.
+//
+// Requires the app to request UNAuthorizationOptionAlert + UNAuthorizationOptionSound
+// at launch.  If the user denies permission, post() is a no-op.
+
 #include "platform/notifications/notifications.hpp"
 
 #import <UserNotifications/UserNotifications.h>

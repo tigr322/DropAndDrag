@@ -1,5 +1,9 @@
 #pragma once
 
+// collection_json.hpp — nlohmann/json serialization for Collection and CollectionStore.
+// Include only in .cpp files that actually need JSON conversion.
+
+
 #include "collection.hpp"
 #include <vendor/nlohmann/json.hpp>
 

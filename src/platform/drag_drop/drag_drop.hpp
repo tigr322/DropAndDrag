@@ -1,5 +1,9 @@
 #pragma once
 
+// drag_drop.hpp — DragDropManager abstract interface.
+// Platform outbound drag is handled by DDDragView (window_mac.mm); this provides inbound registration.
+
+
 #include <cstdint>
 #include <functional>
 #include <optional>

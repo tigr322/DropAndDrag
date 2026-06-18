@@ -1,3 +1,8 @@
+// tray_mac.mm — macOS SystemTray via NSStatusBar / NSStatusItem.
+//
+// The status-bar item uses an NSMenu for its menu; menu actions are dispatched
+// via the menuCallback_ registered by SystemTray::setMenuCallback().
+
 #include "platform/tray/tray.hpp"
 
 #import <Cocoa/Cocoa.h>

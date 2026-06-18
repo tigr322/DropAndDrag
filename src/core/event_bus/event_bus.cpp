@@ -1,3 +1,12 @@
+// event_bus.cpp — Pub/sub event bus implementation.
+//
+// Thread safety: subscribe/unsubscribe/emit are all guarded by mutex_.
+// emit() copies the callback list under the lock and releases before calling
+// them, so subscribers can themselves call unsubscribe() without deadlock.
+//
+// Test isolation: set_instance_for_test(&mock) redirects instance() to the
+// provided object.  Clear with nullptr after the test.
+
 #include "event_bus.hpp"
 
 #include <chrono>

@@ -1,5 +1,9 @@
 #pragma once
 
+// settings.hpp — Application settings: data struct + thread-safe store.
+// Persisted as JSON; includes nlohmann directly (settings are always serialized).
+
+
 #include <vendor/nlohmann/json.hpp>
 
 #include <shared_mutex>

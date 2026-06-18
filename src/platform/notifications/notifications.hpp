@@ -1,5 +1,9 @@
 #pragma once
 
+// notifications.hpp — Notifications abstract interface.
+// Platform implementations: UNUserNotificationCenter (macOS), WinRT Toast (Win), libnotify (Linux).
+
+
 #include <functional>
 #include <string>
 #include <string_view>

@@ -1,5 +1,9 @@
 #pragma once
 
+// hotkeys.hpp — HotkeyManager: global hotkey registration + string parser.
+// Platform implementations: Carbon (macOS), RegisterHotKey (Win), XInput2 (Linux).
+
+
 #include <cstdint>
 #include <functional>
 #include <optional>

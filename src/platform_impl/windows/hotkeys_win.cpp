@@ -1,3 +1,5 @@
+// hotkeys_win.cpp — Windows global hotkeys stub (RegisterHotKey implementation pending).
+
 #include "platform/hotkeys/hotkeys.hpp"
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX

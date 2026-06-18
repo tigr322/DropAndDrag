@@ -1,3 +1,17 @@
+// application.cpp — Application lifecycle: init, run loop, shutdown.
+//
+// Startup order matters because of DI dependencies:
+//   Database must be open before ItemStore or SearchEngine are constructed.
+//   NativeWindow must exist before Renderer::init() receives the view handle.
+//   shake_detector_ must be constructed before start_mouse_monitor() is called.
+//
+// All init_*() helpers return false on fatal error; init() propagates that
+// immediately.  Non-fatal failures (Accessibility denied, tray unavailable)
+// are logged as WARN and startup continues.
+//
+// Threading note: everything in this file runs on the main thread.  The only
+// cross-thread concern is g_app_instance (atomic) used by the signal handler.
+
 #include "application.hpp"
 
 #include <core/collections/collection.hpp>
@@ -56,6 +70,9 @@ std::mutex g_log_mutex;
 std::ofstream g_log_file;
 bool g_log_to_console{true};
 
+// Thread-safe: called from the signal handler (atomic app pointer) as well as
+// from the main thread via init/shutdown helpers.  The mutex protects the
+// shared log_file and ensures lines don't interleave on the console.
 void log_message(std::string_view level, std::string_view message) {
     std::lock_guard lock(g_log_mutex);
     auto now = std::chrono::system_clock::now();
@@ -307,6 +324,9 @@ bool Application::init_logging(const std::string& app_data_dir) {
 
 bool Application::init_database(const std::string& /*app_data_dir*/) {
     database_ = std::make_unique<Database>();
+    // Database::init() is async (returns std::future<bool>) because it runs
+    // schema migrations on the DB thread.  Block here — everything that follows
+    // in startup requires a valid, migrated database.
     auto result = database_->init(db_path_);
     result.wait();
     return result.get();
@@ -450,6 +470,8 @@ bool Application::init_ui() {
 }
 
 void Application::wire_event_bus() {
+    // Currently only SettingsChanged is handled.  The bus is ready for future
+    // subscribers (ItemAdded, ShelfShown, etc.) — add them here as features land.
     event_bus_->subscribe(EventType::SettingsChanged, [this](const Event& e) {
         auto new_settings = settings_->get();
         auto hkdef = HotkeyManager::parseHotkeyString(new_settings.global_hotkey);

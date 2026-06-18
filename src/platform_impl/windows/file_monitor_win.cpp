@@ -1,3 +1,5 @@
+// file_monitor_win.cpp — Windows filesystem monitor stub (ReadDirectoryChangesW implementation pending).
+
 #include "platform/fs_monitor/fs_monitor.hpp"
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX

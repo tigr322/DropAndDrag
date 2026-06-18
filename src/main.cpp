@@ -1,3 +1,9 @@
+// main.cpp — Entry point.  Delegates immediately to Application.
+//
+// init() runs the full startup sequence (database, platform, UI, mouse monitor).
+// run() enters the platform event loop and blocks until shutdown is requested.
+// shutdown() is called explicitly so RAII cleanup is logged before process exit.
+
 #include "app/application.hpp"
 
 #include <cstdlib>

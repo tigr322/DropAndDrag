@@ -1,5 +1,9 @@
 #pragma once
 
+// search_engine.hpp — Full-text search engine backed by SQLite FTS5.
+// Queries the search_index virtual table maintained by item triggers.
+
+
 #include "../items/item.hpp"
 
 #include <memory>

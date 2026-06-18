@@ -1,3 +1,5 @@
+// mouse_monitor_win.cpp — Windows mouse monitor stub (SetWindowsHookEx WH_MOUSE_LL implementation pending).
+
 #include "platform/mouse_monitor/mouse_monitor.hpp"
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX

@@ -1,5 +1,8 @@
 #pragma once
 
+// window_manager.hpp — WindowManager: tracks NativeWindow instances, z-order, show/hide policy.
+
+
 #include "native_window.hpp"
 
 #include <chrono>

@@ -1,3 +1,5 @@
+// file_monitor_linux.cpp — Linux filesystem monitor stub (inotify implementation pending).
+
 #include "platform/fs_monitor/fs_monitor.hpp"
 
 #include <sys/inotify.h>

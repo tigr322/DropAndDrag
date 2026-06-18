@@ -1,3 +1,6 @@
+// tray.cpp — SystemTray singleton base.
+// Platform-specific implementation is in platform_impl/ (NSStatusBar on macOS).
+
 #include "tray.hpp"
 
 namespace dd {

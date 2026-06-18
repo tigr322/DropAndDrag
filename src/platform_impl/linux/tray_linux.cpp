@@ -1,3 +1,5 @@
+// tray_linux.cpp — Linux system tray stub (libappindicator/StatusNotifierItem pending).
+
 #include "platform/tray/tray.hpp"
 
 #include <X11/Xlib.h>

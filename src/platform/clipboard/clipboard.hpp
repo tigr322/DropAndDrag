@@ -1,5 +1,9 @@
 #pragma once
 
+// clipboard.hpp — ClipboardManager abstract interface.
+// Platform implementations: clipboard_mac.mm, clipboard_win.cpp, clipboard_linux.cpp.
+
+
 #include <cstdint>
 #include <string>
 #include <string_view>

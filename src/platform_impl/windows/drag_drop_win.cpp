@@ -1,3 +1,5 @@
+// drag_drop_win.cpp — Windows drag-drop stub (OLE IDropTarget implementation pending).
+
 #include "platform/drag_drop/drag_drop.hpp"
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX

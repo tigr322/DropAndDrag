@@ -1,3 +1,5 @@
+// mouse_monitor_linux.cpp — Linux mouse monitor stub (XInput2 implementation pending).
+
 #include "platform/mouse_monitor/mouse_monitor.hpp"
 
 #include <X11/Xlib.h>

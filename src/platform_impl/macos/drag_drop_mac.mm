@@ -1,3 +1,6 @@
+// drag_drop_mac.mm — macOS DragDropManager stub (outbound drag is handled
+// directly by DDDragView in window_mac.mm; this provides the singleton).
+
 #include "platform/drag_drop/drag_drop.hpp"
 
 #import <AppKit/AppKit.h>

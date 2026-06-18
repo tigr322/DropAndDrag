@@ -1,3 +1,9 @@
+// hotkeys_mac.mm — macOS global hotkeys via Carbon RegisterEventHotKey.
+//
+// Carbon hotkeys fire in all app states (frontmost or background), which is
+// required since the shelf runs as an accessory (no activation on click).
+// The Carbon event handler dispatches to HotkeyManager::instance().callback_.
+
 #include "platform/hotkeys/hotkeys.hpp"
 
 #import <Carbon/Carbon.h>

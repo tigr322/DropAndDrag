@@ -1,5 +1,9 @@
 #pragma once
 
+// fs_monitor.hpp — FileSystemMonitor abstract interface.
+// Platform implementations: FSEvents (macOS), ReadDirectoryChangesW (Win), inotify (Linux).
+
+
 #include <chrono>
 #include <cstdint>
 #include <functional>

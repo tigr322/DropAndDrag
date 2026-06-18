@@ -1,3 +1,36 @@
+// window_mac.mm — macOS NativeWindow implementation.
+//
+// Class hierarchy:
+//   NativeWindow (C++ abstract interface, platform/window/native_window.hpp)
+//     └─ DDMacWindow (C++ impl, defined at bottom of this file)
+//           ├─ DDWindow   : NSPanel       — the floating window
+//           └─ DDDragView : NSView        — content view; owns all event dispatch
+//
+// Why NSPanel instead of NSWindow?
+//   NSPanel supports NSWindowStyleMaskNonactivatingPanel — clicks on the shelf
+//   never steal keyboard focus from the application the user is interacting with.
+//
+// Event flow:
+//   NSApp → DDWindow → DDDragView (responder chain)
+//   DDDragView → DDWindowDelegate callbacks → C++ NativeWindow callbacks → Application
+//
+// Drag-drop inbound (files dropped onto shelf):
+//   DDDragView implements NSDraggingDestination.  File/URL/text/image types are
+//   resolved in priority order in performDragOperation:.
+//
+// Drag-drop outbound (user drags item from shelf):
+//   DDDragView implements NSDraggingSource.  The renderer supplies NSDraggingItem[]
+//   via ddDragOutBlock.  The shelf is hidden during the drag and restored on completion.
+//
+// Window drag:
+//   Implemented manually — _windowDragActive + setFrame:display:NO — because
+//   AppKit's movableByWindowBackground stops working after a programmatic setFrame:.
+//   See the inline comments on mouseDownCanMoveWindow for the full explanation.
+//
+// Rendering:
+//   DDDragView::drawRect: calls _ddDrawBlock (set by Renderer::init).
+//   During window drag, drawRect: returns immediately (no Skia work needed).
+
 #include "platform/window/native_window.hpp"
 
 #import <Cocoa/Cocoa.h>
@@ -453,6 +486,13 @@ static const CGFloat kSideGripW       = 10.0; // px from each side edge
 
 
 // ─── C++ helpers ──────────────────────────────────────────────────────────────
+// wireCallbacks — bridge between DDWindowDelegate ObjC blocks and C++ std::function
+// callbacks.  Called once at construction time with the (empty) initial callbacks.
+//
+// IMPORTANT: callbacks are captured by value at call time.  If Application sets
+// a new dropCallback_ after construction (which it does — setDropCallback is called
+// after init_ui), wireCallbacks must be called again for onDrop to pick it up.
+// DDMacWindow::setDropCallback re-wires onDrop directly to avoid a full re-wire.
 
 namespace {
 

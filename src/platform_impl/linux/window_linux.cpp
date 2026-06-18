@@ -1,3 +1,5 @@
+// window_linux.cpp — Linux NativeWindow stub (X11 implementation pending).
+
 #include "platform/window/native_window.hpp"
 
 #include <X11/Xlib.h>

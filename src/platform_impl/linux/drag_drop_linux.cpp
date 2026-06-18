@@ -1,3 +1,5 @@
+// drag_drop_linux.cpp — Linux drag-drop stub (XDnd implementation pending).
+
 #include "platform/drag_drop/drag_drop.hpp"
 #include "platform/window/native_window.hpp"
 

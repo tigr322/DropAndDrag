@@ -1,3 +1,12 @@
+// file_monitor_mac.mm — macOS FileSystemMonitor via FSEvents.
+//
+// FSEvents delivers change notifications at the directory level with a latency
+// of ~0.5s (configurable).  The callback is dispatched on a background serial
+// queue and must not touch UI directly — callers should dispatch to main.
+//
+// FSEventStreamCreate uses kFSEventStreamCreateFlagFileEvents so individual
+// file-level changes (create, modify, delete, rename) are reported separately.
+
 #include "platform/fs_monitor/fs_monitor.hpp"
 
 #import <CoreServices/CoreServices.h>

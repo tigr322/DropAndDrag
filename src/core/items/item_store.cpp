@@ -1,3 +1,15 @@
+// item_store.cpp — In-memory item store backed by a shared_mutex.
+//
+// Read methods (get, getAll, count) take a shared_lock — concurrent reads
+// are allowed.  Write methods (add, update, remove, clear) take a unique_lock.
+//
+// Observers are notified after the item mutex is released so they can safely
+// call back into the store without deadlock.  observer_mutex_ is separate from
+// mutex_ for the same reason.
+//
+// Test isolation: set_instance_for_test(IItemStore*) overrides the singleton;
+// pass nullptr to restore normal behavior.
+
 #include "item_store.hpp"
 
 #include <mutex>

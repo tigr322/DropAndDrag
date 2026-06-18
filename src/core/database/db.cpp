@@ -1,3 +1,24 @@
+// db.cpp — SQLite3 database implementation.
+//
+// Threading model: all sqlite3* calls happen exclusively on db_thread_.
+// Public methods (insertItem, deleteItem, etc.) enqueue a lambda to task_queue_
+// and return a std::future immediately.  The caller can .get() to block or
+// ignore the future entirely (fire-and-forget).
+//
+// Initialization sequence (on a detached thread in init()):
+//   1. sqlite3_open_v2  — WAL mode, synchronous=NORMAL (faster, still safe)
+//   2. run_migrations   — versioned schema upgrades; each in its own transaction
+//   3. start db_thread_ — the jthread that services task_queue_
+//   4. set_value(true)  — caller's future resolves; Application unblocks
+//
+// WAL mode enables concurrent reads while one writer is active, which is
+// the common case: one background writer (insertItem) + UI thread reading
+// getAllItems on startup.
+//
+// close() stops db_thread_ by enqueueing a final sentinel task that calls
+// request_stop(), then ~Database blocks on join().  This ensures every task
+// enqueued before close() has run before the sqlite3* handle is destroyed.
+
 #include "db.hpp"
 #include "migrations.hpp"
 

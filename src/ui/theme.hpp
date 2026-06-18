@@ -1,4 +1,8 @@
 #pragma once
+
+// theme.hpp — Theme: color palettes for light/dark/auto modes.
+// Auto resolves to Dark or Light at render time by querying the OS appearance.
+
 #include <include/core/SkColor.h>
 
 namespace dd {

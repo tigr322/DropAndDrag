@@ -1,5 +1,9 @@
 #pragma once
 
+// tray.hpp — SystemTray abstract interface.
+// Platform implementations: NSStatusBar (macOS), Shell_NotifyIcon (Win), libappindicator (Linux).
+
+
 #include <cstdint>
 #include <functional>
 #include <string>

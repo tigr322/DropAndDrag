@@ -1,3 +1,6 @@
+// hotkeys.cpp — HotkeyManager: singleton + hotkey string parser.
+// Platform registration is delegated to platform_impl/ (Carbon on macOS).
+
 #include "hotkeys.hpp"
 
 #include <algorithm>

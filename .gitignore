@@ -47,3 +47,6 @@ dist/
 /.cache/
 RELEASE.md
 build_x64/
+
+# Local architecture audit — not for version control
+ARCH_AUDIT.md

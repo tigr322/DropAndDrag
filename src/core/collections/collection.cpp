@@ -1,3 +1,5 @@
+// collection.cpp — In-memory CollectionStore (shared_mutex, same pattern as ItemStore).
+
 #include "collection.hpp"
 
 #include <algorithm>

@@ -1,3 +1,18 @@
+// migrations.cpp — Versioned SQLite schema upgrades.
+//
+// Each migration runs in its own BEGIN IMMEDIATE / COMMIT transaction via
+// run_in_transaction().  On failure, ROLLBACK leaves the DB at the previous
+// version; the next application start sees the same version number and retries.
+// user_version (SQLite PRAGMA) is bumped to the target version only after a
+// successful COMMIT, so the version number is always the highest fully-applied
+// migration.
+//
+// Adding a migration:
+//   1. Implement bool migrate_vN(sqlite3*) — all DDL in one go.
+//   2. Add  if (version < N) { run_in_transaction(db, N, migrate_vN); ... }
+//      to run_migrations(), following the existing pattern.
+//   3. Bump kCurrentVersion.
+
 #include "migrations.hpp"
 
 #include <sqlite3.h>

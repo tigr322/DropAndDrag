@@ -1,3 +1,6 @@
+// clipboard_mac.mm — macOS ClipboardManager via NSPasteboard.
+// Main-thread only: NSPasteboard is not thread-safe.
+
 #include "platform/clipboard/clipboard.hpp"
 
 #import <AppKit/AppKit.h>

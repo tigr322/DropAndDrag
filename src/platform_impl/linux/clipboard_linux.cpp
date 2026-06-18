@@ -1,3 +1,5 @@
+// clipboard_linux.cpp — Linux clipboard stub (X11/Wayland implementation pending).
+
 #include "platform/clipboard/clipboard.hpp"
 
 #include <X11/Xlib.h>

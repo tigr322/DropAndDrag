@@ -1,5 +1,9 @@
 #pragma once
 
+// collection.hpp — Collection struct and in-memory CollectionStore.
+// JSON-free; use collection_json.hpp for serialization.
+
+
 #include <chrono>
 #include <string>
 

@@ -1,3 +1,5 @@
+// tray_win.cpp — Windows system tray stub (Shell_NotifyIcon implementation pending).
+
 #include "platform/tray/tray.hpp"
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX

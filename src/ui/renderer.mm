@@ -1,3 +1,33 @@
+// renderer.mm — Objective-C++ implementation of the Renderer C++ class.
+//
+// This file is the entire UI rendering layer for macOS.  It is intentionally
+// a single file: all globals, helpers, and callbacks live here to keep the
+// ObjC/C++ interop boundary in one place.
+//
+// Rendering model:
+//   • Reactive, not polling — drawRect: fires only when setNeedsDisplay:YES is
+//     called explicitly.  No CADisplayLink, no 60Hz timer.
+//   • drawShelf() is a pure function (reads globals, no side-effects) that is
+//     called from DDDragView::drawRect: via _ddDrawBlock.
+//
+// Global state (main-thread only, no locking needed):
+//   g_view         — the content NSView (DDDragView)
+//   g_w / g_h      — current logical dimensions
+//   g_tileRects    — item bounding rects updated every draw; used for hit-test
+//   g_*BtnRect     — button rects updated every draw; used for hit-test
+//   g_selectedIndices — current selection set
+//   g_scrollOffsetY   — current scroll position in points
+//
+// Caches (main-thread only, never locked):
+//   g_iconCache    — filesystem path → NSImage (system icon via NSWorkspace)
+//   g_thumbCache   — item uuid → NSImage (QuickLook 96px @2x thumbnail)
+//   g_faviconCache — domain string → NSImage (Google favicon service)
+//   g_labelCache   — item uuid → {truncated NSString, pre-measured width}
+//   g_bgPath       — CGPathRef for the background rounded-rect (rebuilt on resize)
+//
+// All cache keys are std::string to avoid per-frame NSString allocation.
+// See ARCH_AUDIT.md §6 for the full rendering pipeline.
+
 #import <Cocoa/Cocoa.h>
 #import <QuickLookThumbnailing/QuickLookThumbnailing.h>
 #import "../platform_impl/macos/dd_renderable.h"
@@ -209,6 +239,9 @@ static const CGFloat kRowGap = 10.0;
 static const CGFloat kBtnSz  = 18.0;
 static const CGFloat kBtnMg = 7.0;
 
+// Returns the index of the item whose tile contains pt, or -1 if none.
+// Uses kTileH (icon + label area) so clicks on the label below an icon still
+// register. Clicks above g_contentClipY0 (the button row) are excluded.
 static NSInteger hitTestItemAt(NSPoint pt, NSUInteger count) {
     if (count == 0 || g_tileRects.size() < count) return -1;
     if (pt.y < g_contentClipY0) return -1;
@@ -465,6 +498,14 @@ bool Renderer::init(void* view, int w, int h) {
 
     if (view) {
         g_view = (__bridge NSView*)view;
+
+        // Capture shared_ptr copies so each ObjC block holds a strong reference
+        // to the heap-allocated value.  This means:
+        //   • Renderer::setItems() writes *si = items — the block sees the new list.
+        //   • Renderer::setClearCallback() writes *cc = cb — the block sees the new fn.
+        //   • Renderer::setHideCallback() writes *hc = cb — the block sees the new fn.
+        // Because the blocks only hold the pointer, not the value, they always call
+        // the most recently installed callback without needing to be re-registered.
         auto si = shared_items_;
         auto cc = clearCallback_;
         auto hc = hideCallback_;
@@ -523,6 +564,12 @@ bool Renderer::init(void* view, int w, int h) {
             };
 
             // ── Drag-out ─────────────────────────────────────────────────────
+            // Called by DDDragView when the user drags from the shelf.
+            // Multi-item: if the drag starts on an already-selected tile, all
+            // selected tiles are dragged together.  If the drag starts on a
+            // non-selected tile, only that tile is dragged (no selection change).
+            // Each item becomes a separate NSDraggingItem so the target receives
+            // one drop per file / URL / text, as AppKit natively expects.
             rv.ddDragOutBlock = ^NSArray<NSDraggingItem*>*(NSPoint pt) {
                 const dd::ItemList& items = *si;
                 if (items.empty()) return nil;
@@ -611,6 +658,9 @@ bool Renderer::init(void* view, int w, int h) {
 }
 
 void Renderer::shutdown() {
+    // Nil all blocks before releasing the view reference so that any in-flight
+    // completion handlers (thumbnails, favicons) that dispatch_async to the main
+    // queue find nil blocks and do nothing rather than touching freed state.
     if (g_view && [g_view conformsToProtocol:@protocol(DDRenderable)]) {
         id<DDRenderable> rv = (id<DDRenderable>)g_view;
         rv.ddDrawBlock        = nil;
@@ -628,9 +678,12 @@ void Renderer::shutdown() {
     g_tileRects.clear();
     g_labelCache.clear();
 
+    // Release the CGPath before clearing bounds so the cache stays consistent.
     if (g_bgPath) { CGPathRelease(g_bgPath); g_bgPath = nullptr; }
     g_bgBounds = {};
 
+    // Flush all image caches and in-flight request sets.  Any completion handler
+    // that arrives after this point checks g_view == nil and skips the redraw.
     g_iconCache.clear();
     g_thumbCache.clear();
     g_faviconCache.clear();

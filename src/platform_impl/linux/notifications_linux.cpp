@@ -1,3 +1,5 @@
+// notifications_linux.cpp — Linux notifications stub (libnotify implementation pending).
+
 #include "platform/notifications/notifications.hpp"
 
 #include <cstdio>

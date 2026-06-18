@@ -1,3 +1,6 @@
+// drag_drop.cpp — DragDropManager singleton (platform-neutral base).
+// Actual drag-drop logic lives in platform_impl/ (DDDragView for macOS).
+
 #include "drag_drop.hpp"
 
 namespace dd {

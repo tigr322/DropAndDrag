@@ -1,3 +1,13 @@
+// native_app_mac.mm — macOS implementations of init_native_app() and
+// native_loop_step().
+//
+// init_native_app(): configures NSApp as an accessory (no Dock icon, no menu
+// bar activation focus-steal), then activates it so the shelf window accepts
+// mouse events immediately.
+//
+// native_loop_step(): pumps one batch of NSEvents (non-blocking) — called by
+// Application::run_cocoa_loop() on every iteration.
+
 #include "platform/native_app.hpp"
 
 #import <Cocoa/Cocoa.h>

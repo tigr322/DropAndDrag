@@ -1,3 +1,5 @@
+// notifications_win.cpp — Windows notifications stub (WinRT ToastNotification implementation pending).
+
 #include "platform/notifications/notifications.hpp"
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX

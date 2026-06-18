@@ -1,5 +1,9 @@
 #pragma once
 
+// tag.hpp — Tag struct and in-memory TagStore.
+// JSON-free; use tag_json.hpp for serialization.
+
+
 #include <string>
 
 namespace dd {

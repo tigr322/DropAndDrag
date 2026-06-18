@@ -1,3 +1,5 @@
+// hotkeys_linux.cpp — Linux global hotkeys stub (XInput2/Xlib implementation pending).
+
 #include "platform/hotkeys/hotkeys.hpp"
 
 #include <X11/Xlib.h>
