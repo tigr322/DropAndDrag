@@ -14,8 +14,7 @@ static int     g_h    = 120;
 
 // Updated by drawShelf every frame; read by all interaction blocks.
 // Main-thread only — no locking needed.
-static CGFloat         g_item_x0      = 12.0;
-static CGFloat         g_item_y0      = 12.0;
+static std::vector<NSRect> g_tileRects;                  // icon rect per item (multi-row)
 static NSRect          g_clearBtnRect = {};
 static NSRect          g_hideBtnRect  = {};
 static std::set<size_t> g_selectedIndices;   // currently selected tile indices
@@ -187,19 +186,22 @@ static void drawColoredTile(NSRect r, const dd::Item& item) {
 static const CGFloat kStep  = 64.0;
 static const CGFloat kIconW = 48.0;
 static const CGFloat kIconH = 48.0;
-static const CGFloat kTileH = 62.0; // icon + label row height
-static const CGFloat kBtnSz = 18.0;
+static const CGFloat kTileH  = 62.0; // icon + label row height
+static const CGFloat kRowGap = 10.0; // vertical gap between rows
+static const CGFloat kBtnSz  = 18.0;
 static const CGFloat kBtnMg = 7.0;
 
 // Returns the tile index under `pt`, or -1 if none.
+// Searches g_tileRects (filled by drawShelf) — works for any number of rows.
 static NSInteger hitTestItemAt(NSPoint pt, NSUInteger count) {
-    if (count == 0) return -1;
-    NSInteger idx = (NSInteger)((pt.x - g_item_x0) / kStep);
-    if (idx < 0 || idx >= (NSInteger)count) return -1;
-    CGFloat tx = g_item_x0 + (CGFloat)idx * kStep;
-    if (pt.x < tx || pt.x > tx + kIconW ||
-        pt.y < g_item_y0 || pt.y > g_item_y0 + kTileH) return -1;
-    return idx;
+    if (count == 0 || g_tileRects.size() < count) return -1;
+    for (NSUInteger i = 0; i < count; ++i) {
+        // Hit area covers the icon plus the label row below it.
+        NSRect r = NSMakeRect(g_tileRects[i].origin.x, g_tileRects[i].origin.y,
+                              kIconW, kTileH);
+        if (NSPointInRect(pt, r)) return (NSInteger)i;
+    }
+    return -1;
 }
 
 // ─── drawShelf ────────────────────────────────────────────────────────────────
@@ -258,12 +260,34 @@ static void drawShelf(CGContextRef ctx, CGRect bounds, const dd::ItemList& items
         CGContextRestoreGState(ctx);
     }
 
-    // ── Centered layout ───────────────────────────────────────────────────────
-    CGFloat groupW = n > 0 ? (CGFloat)(n - 1) * kStep + kIconW : 0;
-    g_item_x0 = n > 0
-        ? std::max(12.0, (bounds.size.width - groupW) / 2.0)
-        : 12.0;
-    g_item_y0 = std::max(8.0, (bounds.size.height - kTileH) / 2.0);
+    // ── Multi-row layout ──────────────────────────────────────────────────────
+    // Fill g_tileRects: wrap items into rows, center each row independently.
+    // hitTestItemAt and ddDragOutBlock read g_tileRects (main thread only).
+    {
+        const CGFloat margin = 12.0;
+        NSInteger cols = (NSInteger)((bounds.size.width - 2.0 * margin) / kStep);
+        if (cols < 1) cols = 1;
+        NSInteger rows = ((NSInteger)n + cols - 1) / cols;
+        CGFloat groupH = (CGFloat)rows * kTileH + (CGFloat)(rows - 1) * kRowGap;
+        // Start below the top buttons; vertically center the grid in the window.
+        CGFloat topReserved = kBtnMg + kBtnSz + kBtnMg;
+        CGFloat startY = std::max(topReserved, (bounds.size.height - groupH) / 2.0);
+
+        g_tileRects.resize(n);
+        for (NSUInteger i = 0; i < n; ++i) {
+            NSInteger row = (NSInteger)i / cols;
+            NSInteger col = (NSInteger)i % cols;
+            // Last row may have fewer items — center it independently.
+            NSInteger itemsInRow = (row == rows - 1)
+                ? (NSInteger)n - row * cols : cols;
+            CGFloat rowW = (CGFloat)(itemsInRow - 1) * kStep + kIconW;
+            CGFloat rowX = (bounds.size.width - rowW) / 2.0;
+            g_tileRects[i] = NSMakeRect(
+                rowX + (CGFloat)col * kStep,
+                startY + (CGFloat)row * (kTileH + kRowGap),
+                kIconW, kIconH);
+        }
+    }
 
     // ── Empty state ───────────────────────────────────────────────────────────
     if (n == 0) {
@@ -285,18 +309,15 @@ static void drawShelf(CGContextRef ctx, CGRect bounds, const dd::ItemList& items
         NSForegroundColorAttributeName: [NSColor colorWithWhite:0.9 alpha:1.0]
     };
 
-    CGFloat x = g_item_x0, y = g_item_y0;
-
     for (NSUInteger i = 0; i < n; ++i) {
         const auto& item = items[i];
-        NSRect iconRect = NSMakeRect(x, y, kIconW, kIconH);
+        NSRect iconRect = g_tileRects[i];
         bool selected = g_selectedIndices.count(i) > 0;
 
         // Selection highlight behind the icon (before clipping)
         if (selected) {
             CGContextSaveGState(ctx);
             CGMutablePathRef selPath = CGPathCreateMutable();
-            // Slightly larger than icon to make the glow visible
             CGPathAddRoundedRect(selPath, nullptr,
                 CGRectInset(NSRectToCGRect(iconRect), -3, -3), 10, 10);
             CGContextAddPath(ctx, selPath);
@@ -348,8 +369,6 @@ static void drawShelf(CGContextRef ctx, CGRect bounds, const dd::ItemList& items
         [nStr drawAtPoint:NSMakePoint(iconRect.origin.x + (kIconW - ns.width) / 2,
                                        iconRect.origin.y + kIconH + 2)
            withAttributes:labelAttrs];
-
-        x += kStep;
     }
 }
 
@@ -455,7 +474,9 @@ bool Renderer::init(void* view, int w, int h) {
                 for (size_t i : toDrag) {
                     if (i >= items.size()) continue;
                     const auto& item = items[i];
-                    CGFloat tileX = g_item_x0 + (CGFloat)i * kStep;
+                    NSRect tileR = (i < g_tileRects.size())
+                        ? g_tileRects[i]
+                        : NSMakeRect(0, 0, kIconW, kIconH);
 
                     // Drag ghost
                     NSImage* tile = iconForItem(item);
@@ -489,11 +510,28 @@ bool Renderer::init(void* view, int w, int h) {
 
                     NSDraggingItem* di =
                         [[NSDraggingItem alloc] initWithPasteboardWriter:writer];
-                    [di setDraggingFrame:NSMakeRect(tileX, g_item_y0, kIconW, kIconH)
-                                contents:tile];
+                    [di setDraggingFrame:tileR contents:tile];
                     [result addObject:di];
                 }
                 return result.count > 0 ? result : nil;
+            };
+
+            // ── Rubber-band selection ─────────────────────────────────────────
+            // Called every mouseDragged: tick while a rubber-band is active.
+            // Without ⌘: replaces selection with all tiles intersecting selRect.
+            // With ⌘: adds intersecting tiles to the existing selection.
+            rv.ddRubberBandBlock = ^(NSRect selRect) {
+                bool cmdDown = ([NSEvent modifierFlags] &
+                                NSEventModifierFlagCommand) != 0;
+                if (!cmdDown) g_selectedIndices.clear();
+                for (NSUInteger i = 0; i < si->size() && i < g_tileRects.size(); ++i) {
+                    NSRect tileArea = NSMakeRect(g_tileRects[i].origin.x,
+                                                  g_tileRects[i].origin.y,
+                                                  kIconW, kTileH);
+                    if (NSIntersectsRect(tileArea, selRect))
+                        g_selectedIndices.insert((size_t)i);
+                }
+                if (g_view) [g_view setNeedsDisplay:YES];
             };
         }
     }
@@ -513,6 +551,7 @@ void Renderer::shutdown() {
     g_view = nil;
     ok_    = false;
     g_selectedIndices.clear();
+    g_tileRects.clear();
 
     [g_iconCache       removeAllObjects];
     [g_thumbCache      removeAllObjects];

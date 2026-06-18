@@ -17,4 +17,7 @@
 // Special click regions (clear button, etc.). Return YES to consume the click
 // and prevent normal mouseDown: processing.
 @property (nonatomic, copy, nullable) BOOL (^ddHandleClickBlock)(NSPoint pt);
+// Called continuously during a rubber-band drag with the current selection rect.
+// The renderer updates g_selectedIndices and triggers a redraw.
+@property (nonatomic, copy, nullable) void (^ddRubberBandBlock)(NSRect selRect);
 @end

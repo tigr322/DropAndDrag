@@ -49,18 +49,25 @@
 // events arrive here via the normal Cocoa dispatch mechanism, then get forwarded
 // to DDWindowDelegate's callbacks.
 
+// Height of the top strip that acts as a window-drag grip (above the item grid).
+// Must match `topReserved` in drawShelf (kBtnMg + kBtnSz + kBtnMg = 7+18+7 = 32).
+static const CGFloat kWindowDragZoneH = 32.0;
+
 @interface DDDragView : NSView <NSDraggingDestination, NSDraggingSource, DDRenderable>
 @property (nonatomic, weak) DDWindowDelegate* ddDelegate;
 @property (nonatomic, copy, nullable) void (^ddDrawBlock)(CGContextRef ctx, CGRect bounds);
 @property (nonatomic, copy, nullable) BOOL (^ddHitTestBlock)(NSPoint pt);
 @property (nonatomic, copy, nullable) NSArray<NSDraggingItem*>* (^ddDragOutBlock)(NSPoint pt);
 @property (nonatomic, copy, nullable) BOOL (^ddHandleClickBlock)(NSPoint pt);
+@property (nonatomic, copy, nullable) void (^ddRubberBandBlock)(NSRect selRect);
 @end
 
 @implementation DDDragView {
-    NSPoint _mouseDownPt;     // saved in mouseDown: for drag-gesture detection
-    BOOL    _dragInitiated;   // prevents multiple session starts per gesture
-    BOOL    _mouseDownOnTile; // YES iff mouseDown landed on an item tile
+    NSPoint _mouseDownPt;       // saved in mouseDown: for drag-gesture detection
+    BOOL    _dragInitiated;     // prevents multiple session starts per gesture
+    BOOL    _mouseDownOnTile;   // YES iff mouseDown landed on an item tile
+    BOOL    _rubberBandActive;  // YES while a rubber-band selection is in progress
+    NSRect  _rubberBandRect;    // current rubber-band selection rect (view coords)
 }
 
 - (BOOL)acceptsFirstResponder { return YES; }
@@ -69,15 +76,18 @@
 - (BOOL)isFlipped             { return YES; }
 
 // Controls whether clicking-and-dragging on this view moves the underlying
-// NSPanel window.  Return NO for tile hits so that gesture goes exclusively
-// to the drag-out session; return YES everywhere else so the shelf can still
-// be repositioned by dragging its background.
+// NSPanel window.
+//   • Buttons and tiles      → NO  (they own their respective interactions)
+//   • Top header strip y<32  → YES (acts as a drag grip to reposition the shelf)
+//   • Item-grid zone y≥32    → NO  (reserved for rubber-band selection)
 - (BOOL)mouseDownCanMoveWindow {
     if (!_ddHitTestBlock || !self.window) return YES;
     NSPoint screenPt = [NSEvent mouseLocation];
     NSPoint winPt    = [self.window convertPointFromScreen:screenPt];
     NSPoint viewPt   = [self convertPoint:winPt fromView:nil];
-    return !_ddHitTestBlock(viewPt);
+    if (_ddHitTestBlock(viewPt))           return NO;   // button / tile
+    if (viewPt.y >= kWindowDragZoneH)      return NO;   // rubber-band zone
+    return YES;                                         // top grip strip
 }
 
 // AppKit calls this with a correctly scaled, flipped CGContext — no manual
@@ -87,6 +97,18 @@
     CGContextRef ctx = (CGContextRef)[[NSGraphicsContext currentContext] CGContext];
     CGContextClearRect(ctx, NSRectToCGRect(self.bounds));
     if (_ddDrawBlock) _ddDrawBlock(ctx, NSRectToCGRect(self.bounds));
+
+    // Rubber-band selection overlay — drawn on top of everything else.
+    if (_rubberBandActive && !NSIsEmptyRect(_rubberBandRect)) {
+        CGContextSaveGState(ctx);
+        CGRect rb = NSRectToCGRect(_rubberBandRect);
+        CGContextSetRGBFillColor(ctx,   0.20, 0.50, 1.0, 0.12);
+        CGContextFillRect(ctx, rb);
+        CGContextSetRGBStrokeColor(ctx, 0.20, 0.50, 1.0, 0.75);
+        CGContextSetLineWidth(ctx, 1.0);
+        CGContextStrokeRect(ctx, CGRectInset(rb, 0.5, 0.5));
+        CGContextRestoreGState(ctx);
+    }
 }
 
 // ── Mouse ────────────────────────────────────────────────────────────────────
@@ -94,9 +116,11 @@
 - (void)mouseDown:(NSEvent*)e {
     NSPoint p = [self convertPoint:e.locationInWindow fromView:nil];
     // Always reset drag state first — even if we return early below.
-    _mouseDownPt     = p;
-    _dragInitiated   = NO;
-    _mouseDownOnTile = _ddHitTestBlock ? _ddHitTestBlock(p) : NO;
+    _mouseDownPt      = p;
+    _dragInitiated    = NO;
+    _rubberBandActive = NO;
+    _rubberBandRect   = NSZeroRect;
+    _mouseDownOnTile  = _ddHitTestBlock ? _ddHitTestBlock(p) : NO;
     // Let the renderer consume special click regions (buttons, etc.).
     if (_ddHandleClickBlock && _ddHandleClickBlock(p)) return;
     if (self.ddDelegate.onMouseDown)
@@ -104,6 +128,12 @@
 }
 - (void)mouseUp:(NSEvent*)e {
     NSPoint p = [self convertPoint:e.locationInWindow fromView:nil];
+    // Finalize any in-progress rubber-band.
+    if (_rubberBandActive) {
+        _rubberBandActive = NO;
+        _rubberBandRect   = NSZeroRect;
+        [self setNeedsDisplay:YES];
+    }
     if (self.ddDelegate.onMouseUp)
         self.ddDelegate.onMouseUp((int)p.x, (int)p.y, (int)e.buttonNumber);
 }
@@ -113,15 +143,15 @@
         self.ddDelegate.onMouseMove((int)p.x, (int)p.y);
 }
 - (void)mouseDragged:(NSEvent*)e {
-    // Only attempt a file drag-out when mouseDown was on an item tile.
-    // If the user dragged from the background, fall through to [super] which
-    // lets the NSPanel's window-moving logic handle it.
+    NSPoint p = [self convertPoint:e.locationInWindow fromView:nil];
+
+    // ── File drag-out from a tile ─────────────────────────────────────────────
     if (!_dragInitiated && _mouseDownOnTile && _ddDragOutBlock) {
-        NSPoint p = [self convertPoint:e.locationInWindow fromView:nil];
         if (hypot(p.x - _mouseDownPt.x, p.y - _mouseDownPt.y) > 5.0) {
             NSArray<NSDraggingItem*>* dragItems = _ddDragOutBlock(_mouseDownPt);
             if (dragItems.count > 0) {
-                _dragInitiated = YES;
+                _dragInitiated    = YES;
+                _rubberBandActive = NO;
                 // Hide the shelf so it doesn't cover the drop target.
                 // draggingSession:endedAtPoint:operation: will restore it.
                 [self.window orderOut:nil];
@@ -129,7 +159,30 @@
                 return;
             }
         }
+        return; // on a tile but no items yet — don't move window or rubber-band
     }
+
+    // ── Rubber-band selection (background below the header strip) ────────────
+    // Drags starting in the top grip zone (y < kWindowDragZoneH) fall through
+    // to [super] for window-move; drags below that zone draw a selection rect.
+    if (!_mouseDownOnTile && _mouseDownPt.y >= kWindowDragZoneH) {
+        if (!_rubberBandActive) {
+            if (hypot(p.x - _mouseDownPt.x, p.y - _mouseDownPt.y) > 3.0)
+                _rubberBandActive = YES;
+        }
+        if (_rubberBandActive) {
+            _rubberBandRect = NSMakeRect(
+                std::min(p.x, _mouseDownPt.x),
+                std::min(p.y, _mouseDownPt.y),
+                std::abs(p.x - _mouseDownPt.x),
+                std::abs(p.y - _mouseDownPt.y));
+            if (_ddRubberBandBlock) _ddRubberBandBlock(_rubberBandRect);
+            [self setNeedsDisplay:YES];
+            return;
+        }
+    }
+
+    // ── Window drag (top grip strip or tile with no draggable items) ─────────
     [super mouseDragged:e];
 }
 

@@ -406,14 +406,17 @@ bool Application::init_ui() {
         }
         renderer_->setItems(items);
 
-        // Grow window width to fit all items (never shrinks here; clear does that).
+        // Resize window to fit a multi-row grid (max 5 columns, height grows per row).
         int n        = static_cast<int>(items.size());
-        int needed_w = std::max(200, n * 64 + 40);
+        constexpr int kMaxCols = 5;
+        int cols     = std::max(1, std::min(n, kMaxCols));
+        int needed_w = std::max(200, cols * 64 + 24);
+        int rows     = (n + cols - 1) / cols;
+        int needed_h = std::max(120, 32 + rows * 62 + (rows - 1) * 10 + 14);
         auto b = native_window_->getBounds();
-        if (needed_w > b.width) {
-            int cx = b.x + b.width / 2;
-            native_window_->setBounds(cx - needed_w / 2, b.y, needed_w, b.height);
-        }
+        int cx = b.x + b.width  / 2;
+        int cy = b.y + b.height / 2;
+        native_window_->setBounds(cx - needed_w / 2, cy - needed_h / 2, needed_w, needed_h);
 
         renderer_->render(0);
     });
@@ -421,10 +424,11 @@ bool Application::init_ui() {
     // ── Clear callback — reset window to default width ────────────────────────
     renderer_->setClearCallback([this]() {
         log_message("INFO", "Shelf cleared");
-        constexpr int kDefaultW = 400;
+        constexpr int kDefaultW = 400, kDefaultH = 120;
         auto b = native_window_->getBounds();
-        int cx = b.x + b.width / 2;
-        native_window_->setBounds(cx - kDefaultW / 2, b.y, kDefaultW, b.height);
+        int cx = b.x + b.width  / 2;
+        int cy = b.y + b.height / 2;
+        native_window_->setBounds(cx - kDefaultW / 2, cy - kDefaultH / 2, kDefaultW, kDefaultH);
     });
 
     // Start with empty shelf (hint text shown by drawShelf when items list is empty).
