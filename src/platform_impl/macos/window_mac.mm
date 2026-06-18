@@ -49,9 +49,12 @@
 // events arrive here via the normal Cocoa dispatch mechanism, then get forwarded
 // to DDWindowDelegate's callbacks.
 
-// Height of the top strip that acts as a window-drag grip (above the item grid).
-// Must match `topReserved` in drawShelf (kBtnMg + kBtnSz + kBtnMg = 7+18+7 = 32).
+// Drag-grip dimensions. The top strip, bottom strip, and thin side edges act as
+// window-drag grips; the interior background is the rubber-band selection zone.
+// kWindowDragZoneH must match `topReserved` in drawShelf (7+18+7 = 32).
 static const CGFloat kWindowDragZoneH = 32.0;
+static const CGFloat kBottomGripH     = 20.0; // px from the bottom edge
+static const CGFloat kSideGripW       = 10.0; // px from each side edge
 
 @interface DDDragView : NSView <NSDraggingDestination, NSDraggingSource, DDRenderable>
 @property (nonatomic, weak) DDWindowDelegate* ddDelegate;
@@ -60,6 +63,7 @@ static const CGFloat kWindowDragZoneH = 32.0;
 @property (nonatomic, copy, nullable) NSArray<NSDraggingItem*>* (^ddDragOutBlock)(NSPoint pt);
 @property (nonatomic, copy, nullable) BOOL (^ddHandleClickBlock)(NSPoint pt);
 @property (nonatomic, copy, nullable) void (^ddRubberBandBlock)(NSRect selRect);
+@property (nonatomic, copy, nullable) void (^ddScrollBlock)(CGFloat deltaY);
 @end
 
 @implementation DDDragView {
@@ -68,6 +72,13 @@ static const CGFloat kWindowDragZoneH = 32.0;
     BOOL    _mouseDownOnTile;   // YES iff mouseDown landed on an item tile
     BOOL    _rubberBandActive;  // YES while a rubber-band selection is in progress
     NSRect  _rubberBandRect;    // current rubber-band selection rect (view coords)
+    // Manual window drag — does not depend on AppKit movableByWindowBackground.
+    // AppKit's movableByWindowBackground stops working after programmatic setFrame:
+    // (e.g. a drop resizes the shelf) until the window is hidden+shown; manual
+    // drag is immune to this because it never touches AppKit's drag machinery.
+    BOOL    _windowDragActive;      // YES while the user is dragging the window
+    NSPoint _windowDragScreenPt;    // [NSEvent mouseLocation] at mouseDown
+    NSPoint _windowDragOrigin;      // window.frame.origin at mouseDown
 }
 
 - (BOOL)acceptsFirstResponder { return YES; }
@@ -77,18 +88,18 @@ static const CGFloat kWindowDragZoneH = 32.0;
 
 // Controls whether clicking-and-dragging on this view moves the underlying
 // NSPanel window.
-//   • Buttons and tiles      → NO  (they own their respective interactions)
-//   • Top header strip y<32  → YES (acts as a drag grip to reposition the shelf)
-//   • Item-grid zone y≥32    → NO  (reserved for rubber-band selection)
-- (BOOL)mouseDownCanMoveWindow {
-    if (!_ddHitTestBlock || !self.window) return YES;
-    NSPoint screenPt = [NSEvent mouseLocation];
-    NSPoint winPt    = [self.window convertPointFromScreen:screenPt];
-    NSPoint viewPt   = [self convertPoint:winPt fromView:nil];
-    if (_ddHitTestBlock(viewPt))           return NO;   // button / tile
-    if (viewPt.y >= kWindowDragZoneH)      return NO;   // rubber-band zone
-    return YES;                                         // top grip strip
-}
+//   • Buttons and tiles              → NO  (they own their interactions)
+//   • Top strip (y < 32)            → YES (header drag grip)
+//   • Bottom strip (last 20 px)     → YES (bottom drag grip)
+//   • Left / right edges (10 px ea) → YES (side drag grips)
+//   • Interior background            → NO  (rubber-band selection zone)
+//
+// Always NO — window drag is implemented manually in mouseDragged: via
+// _windowDragActive so that it survives programmatic setFrame: calls.
+// AppKit's movableByWindowBackground mechanism loses its state after a
+// programmatic frame change (e.g. shelf resizes on drop), which is why
+// returning YES here caused dragging to break until hide+show reset it.
+- (BOOL)mouseDownCanMoveWindow { return NO; }
 
 // AppKit calls this with a correctly scaled, flipped CGContext — no manual
 // CGBitmapContext, coordinate transforms, or contentsScale bookkeeping needed.
@@ -116,11 +127,25 @@ static const CGFloat kWindowDragZoneH = 32.0;
 - (void)mouseDown:(NSEvent*)e {
     NSPoint p = [self convertPoint:e.locationInWindow fromView:nil];
     // Always reset drag state first — even if we return early below.
-    _mouseDownPt      = p;
-    _dragInitiated    = NO;
-    _rubberBandActive = NO;
-    _rubberBandRect   = NSZeroRect;
-    _mouseDownOnTile  = _ddHitTestBlock ? _ddHitTestBlock(p) : NO;
+    _mouseDownPt       = p;
+    _dragInitiated     = NO;
+    _rubberBandActive  = NO;
+    _rubberBandRect    = NSZeroRect;
+    _windowDragActive  = NO;
+    _mouseDownOnTile   = _ddHitTestBlock ? _ddHitTestBlock(p) : NO;
+    // Detect grip zones for manual window drag (only when not on a tile/button).
+    if (!_mouseDownOnTile && self.window) {
+        NSSize sz = self.bounds.size;
+        BOOL inGrip = (p.y < kWindowDragZoneH)
+                   || (p.y > sz.height - kBottomGripH)
+                   || (p.x < kSideGripW)
+                   || (p.x > sz.width  - kSideGripW);
+        if (inGrip) {
+            _windowDragActive   = YES;
+            _windowDragScreenPt = [NSEvent mouseLocation];
+            _windowDragOrigin   = self.window.frame.origin;
+        }
+    }
     // Let the renderer consume special click regions (buttons, etc.).
     if (_ddHandleClickBlock && _ddHandleClickBlock(p)) return;
     if (self.ddDelegate.onMouseDown)
@@ -128,6 +153,7 @@ static const CGFloat kWindowDragZoneH = 32.0;
 }
 - (void)mouseUp:(NSEvent*)e {
     NSPoint p = [self convertPoint:e.locationInWindow fromView:nil];
+    _windowDragActive = NO;
     // Finalize any in-progress rubber-band.
     if (_rubberBandActive) {
         _rubberBandActive = NO;
@@ -144,6 +170,20 @@ static const CGFloat kWindowDragZoneH = 32.0;
 }
 - (void)mouseDragged:(NSEvent*)e {
     NSPoint p = [self convertPoint:e.locationInWindow fromView:nil];
+
+    // ── Manual window drag from grip zones ───────────────────────────────────
+    // _windowDragActive is set in mouseDown: when the press landed in a grip
+    // zone (not on any tile or button).  We track the delta from the original
+    // screen position ourselves so this works even after a programmatic
+    // setFrame: has reset AppKit's internal movableByWindowBackground state.
+    if (_windowDragActive) {
+        NSPoint cur = [NSEvent mouseLocation];
+        NSPoint newOrigin = NSMakePoint(
+            _windowDragOrigin.x + cur.x - _windowDragScreenPt.x,
+            _windowDragOrigin.y + cur.y - _windowDragScreenPt.y);
+        [self.window setFrameOrigin:newOrigin];
+        return;
+    }
 
     // ── File drag-out from a tile ─────────────────────────────────────────────
     if (!_dragInitiated && _mouseDownOnTile && _ddDragOutBlock) {
@@ -162,28 +202,34 @@ static const CGFloat kWindowDragZoneH = 32.0;
         return; // on a tile but no items yet — don't move window or rubber-band
     }
 
-    // ── Rubber-band selection (background below the header strip) ────────────
-    // Drags starting in the top grip zone (y < kWindowDragZoneH) fall through
-    // to [super] for window-move; drags below that zone draw a selection rect.
-    if (!_mouseDownOnTile && _mouseDownPt.y >= kWindowDragZoneH) {
-        if (!_rubberBandActive) {
-            if (hypot(p.x - _mouseDownPt.x, p.y - _mouseDownPt.y) > 3.0)
-                _rubberBandActive = YES;
-        }
-        if (_rubberBandActive) {
-            _rubberBandRect = NSMakeRect(
-                std::min(p.x, _mouseDownPt.x),
-                std::min(p.y, _mouseDownPt.y),
-                std::abs(p.x - _mouseDownPt.x),
-                std::abs(p.y - _mouseDownPt.y));
-            if (_ddRubberBandBlock) _ddRubberBandBlock(_rubberBandRect);
-            [self setNeedsDisplay:YES];
-            return;
+    // ── Rubber-band selection (interior background only) ─────────────────────
+    // Only starts when the mouseDown was in the INTERIOR of the shelf — i.e.
+    // below the top grip, above the bottom grip, and away from the side grips.
+    // Grip-zone drags are handled above via _windowDragActive.
+    {
+        NSSize sz  = self.bounds.size;
+        BOOL inInterior = !_mouseDownOnTile
+            && _mouseDownPt.y >= kWindowDragZoneH
+            && _mouseDownPt.y <= (sz.height - kBottomGripH)
+            && _mouseDownPt.x >= kSideGripW
+            && _mouseDownPt.x <= (sz.width  - kSideGripW);
+        if (inInterior) {
+            if (!_rubberBandActive) {
+                if (hypot(p.x - _mouseDownPt.x, p.y - _mouseDownPt.y) > 3.0)
+                    _rubberBandActive = YES;
+            }
+            if (_rubberBandActive) {
+                _rubberBandRect = NSMakeRect(
+                    std::min(p.x, _mouseDownPt.x),
+                    std::min(p.y, _mouseDownPt.y),
+                    std::abs(p.x - _mouseDownPt.x),
+                    std::abs(p.y - _mouseDownPt.y));
+                if (_ddRubberBandBlock) _ddRubberBandBlock(_rubberBandRect);
+                [self setNeedsDisplay:YES];
+                return;
+            }
         }
     }
-
-    // ── Window drag (top grip strip or tile with no draggable items) ─────────
-    [super mouseDragged:e];
 }
 
 // ── NSDraggingSource ─────────────────────────────────────────────────────────
@@ -214,6 +260,16 @@ static const CGFloat kWindowDragZoneH = 32.0;
 - (void)keyUp:(NSEvent*)e {
     if (self.ddDelegate.onKeyUp)
         self.ddDelegate.onKeyUp((int)e.keyCode, (int)e.modifierFlags);
+}
+
+// ── Scroll wheel ─────────────────────────────────────────────────────────────
+
+- (void)scrollWheel:(NSEvent*)e {
+    // Use precise scrolling deltas for trackpad/Magic Mouse; fall back to
+    // the coarser deltaY (scaled by 12 px per tick) for traditional wheels.
+    CGFloat delta = e.hasPreciseScrollingDeltas ? e.scrollingDeltaY : e.deltaY * 12.0;
+    if (_ddScrollBlock && delta != 0.0) _ddScrollBlock(delta);
+    else [super scrollWheel:e];
 }
 
 // ── NSDraggingDestination ─────────────────────────────────────────────────────

@@ -19,6 +19,11 @@ static NSRect          g_clearBtnRect = {};
 static NSRect          g_hideBtnRect  = {};
 static std::set<size_t> g_selectedIndices;   // currently selected tile indices
 
+// Scroll state — updated by drawShelf, mutated by ddScrollBlock.
+static CGFloat g_scrollOffsetY   = 0.0; // current scroll position in pixels
+static CGFloat g_maxScrollOffset = 0.0; // max allowed offset (0 = no overflow)
+static CGFloat g_contentClipY0   = 32.0; // top of the scrollable content area
+
 // ─── Caches — main thread only ───────────────────────────────────────────────
 
 static NSMutableDictionary<NSString*, NSImage*>* g_iconCache;
@@ -193,8 +198,11 @@ static const CGFloat kBtnMg = 7.0;
 
 // Returns the tile index under `pt`, or -1 if none.
 // Searches g_tileRects (filled by drawShelf) — works for any number of rows.
+// Ignores clicks above g_contentClipY0 (the header button strip) so that
+// scrolled-up tiles can never be hit-tested through the header.
 static NSInteger hitTestItemAt(NSPoint pt, NSUInteger count) {
     if (count == 0 || g_tileRects.size() < count) return -1;
+    if (pt.y < g_contentClipY0) return -1; // above scrollable area
     for (NSUInteger i = 0; i < count; ++i) {
         // Hit area covers the icon plus the label row below it.
         NSRect r = NSMakeRect(g_tileRects[i].origin.x, g_tileRects[i].origin.y,
@@ -260,18 +268,34 @@ static void drawShelf(CGContextRef ctx, CGRect bounds, const dd::ItemList& items
         CGContextRestoreGState(ctx);
     }
 
-    // ── Multi-row layout ──────────────────────────────────────────────────────
-    // Fill g_tileRects: wrap items into rows, center each row independently.
-    // hitTestItemAt and ddDragOutBlock read g_tileRects (main thread only).
+    // ── Scroll-aware multi-row layout ─────────────────────────────────────────
+    // When all rows fit, centers them vertically (no scroll).
+    // When content overflows, top-aligns and offsets by g_scrollOffsetY.
+    // g_contentClipY0 marks the top of the item grid (below the header buttons).
     {
-        const CGFloat margin = 12.0;
+        const CGFloat margin    = 12.0;
+        const CGFloat bottomPad = 14.0;
         NSInteger cols = (NSInteger)((bounds.size.width - 2.0 * margin) / kStep);
         if (cols < 1) cols = 1;
-        NSInteger rows = ((NSInteger)n + cols - 1) / cols;
-        CGFloat groupH = (CGFloat)rows * kTileH + (CGFloat)(rows - 1) * kRowGap;
-        // Start below the top buttons; vertically center the grid in the window.
+        NSInteger rows      = ((NSInteger)n + cols - 1) / cols;
         CGFloat topReserved = kBtnMg + kBtnSz + kBtnMg;
-        CGFloat startY = std::max(topReserved, (bounds.size.height - groupH) / 2.0);
+        CGFloat groupH      = (CGFloat)rows * kTileH + (CGFloat)(rows - 1) * kRowGap;
+        CGFloat visibleH    = bounds.size.height - topReserved - bottomPad;
+
+        g_contentClipY0 = topReserved;
+
+        CGFloat startY;
+        if (groupH <= visibleH) {
+            // All rows fit — center vertically, no scroll needed.
+            startY            = std::max(topReserved, (bounds.size.height - groupH) / 2.0);
+            g_scrollOffsetY   = 0.0;
+            g_maxScrollOffset = 0.0;
+        } else {
+            // Content overflows — top-align and apply scroll offset.
+            g_maxScrollOffset = groupH - visibleH;
+            g_scrollOffsetY   = std::max(0.0, std::min(g_scrollOffsetY, g_maxScrollOffset));
+            startY            = topReserved - g_scrollOffsetY;
+        }
 
         g_tileRects.resize(n);
         for (NSUInteger i = 0; i < n; ++i) {
@@ -303,18 +327,28 @@ static void drawShelf(CGContextRef ctx, CGRect bounds, const dd::ItemList& items
         return;
     }
 
-    // ── Item tiles ────────────────────────────────────────────────────────────
+    // ── Item tiles (clipped to the scrollable content area) ───────────────────
     NSDictionary* labelAttrs = @{
         NSFontAttributeName: [NSFont systemFontOfSize:10],
         NSForegroundColorAttributeName: [NSColor colorWithWhite:0.9 alpha:1.0]
     };
 
+    // Clip drawing so scrolled-out tiles don't bleed into the header strip.
+    CGContextSaveGState(ctx);
+    CGContextClipToRect(ctx, CGRectMake(0, g_contentClipY0,
+                                         bounds.size.width,
+                                         bounds.size.height - g_contentClipY0));
+
     for (NSUInteger i = 0; i < n; ++i) {
-        const auto& item = items[i];
         NSRect iconRect = g_tileRects[i];
+        // Skip tiles completely outside the visible band (optimisation).
+        if (iconRect.origin.y + kTileH <= g_contentClipY0) continue;
+        if (iconRect.origin.y >= bounds.size.height)        continue;
+
+        const auto& item = items[i];
         bool selected = g_selectedIndices.count(i) > 0;
 
-        // Selection highlight behind the icon (before clipping)
+        // Selection highlight behind the icon.
         if (selected) {
             CGContextSaveGState(ctx);
             CGMutablePathRef selPath = CGPathCreateMutable();
@@ -327,7 +361,7 @@ static void drawShelf(CGContextRef ctx, CGRect bounds, const dd::ItemList& items
             CGContextRestoreGState(ctx);
         }
 
-        // Icon (clipped to rounded rect)
+        // Icon (clipped to rounded rect).
         NSImage* icon = iconForItem(item);
         if (icon) {
             CGContextSaveGState(ctx);
@@ -347,7 +381,7 @@ static void drawShelf(CGContextRef ctx, CGRect bounds, const dd::ItemList& items
             drawColoredTile(iconRect, item);
         }
 
-        // Selection border on top of icon
+        // Selection border on top of icon.
         if (selected) {
             NSBezierPath* border = [NSBezierPath
                 bezierPathWithRoundedRect:NSInsetRect(iconRect, 1.5, 1.5)
@@ -369,6 +403,41 @@ static void drawShelf(CGContextRef ctx, CGRect bounds, const dd::ItemList& items
         [nStr drawAtPoint:NSMakePoint(iconRect.origin.x + (kIconW - ns.width) / 2,
                                        iconRect.origin.y + kIconH + 2)
            withAttributes:labelAttrs];
+    }
+
+    CGContextRestoreGState(ctx); // restore content-area clip
+
+    // ── Scrollbar ─────────────────────────────────────────────────────────────
+    // Drawn on top, outside the clip, only when content overflows.
+    if (g_maxScrollOffset > 0.0) {
+        const CGFloat trackW   = 4.0;
+        const CGFloat trackPad = 5.0;
+        const CGFloat bottomPad = 14.0;
+        CGFloat trackX  = bounds.size.width - trackW - trackPad;
+        CGFloat trackY0 = g_contentClipY0 + 4.0;
+        CGFloat trackH  = bounds.size.height - g_contentClipY0 - bottomPad - 4.0;
+        // Thumb size is proportional to the visible fraction of content.
+        CGFloat thumbH  = std::max(20.0, trackH * trackH / (trackH + g_maxScrollOffset));
+        CGFloat thumbY  = trackY0 + (trackH - thumbH) * (g_scrollOffsetY / g_maxScrollOffset);
+
+        CGContextSaveGState(ctx);
+        // Track (barely visible)
+        CGMutablePathRef trackPath = CGPathCreateMutable();
+        CGPathAddRoundedRect(trackPath, nullptr,
+            CGRectMake(trackX, trackY0, trackW, trackH), 2.0, 2.0);
+        CGContextAddPath(ctx, trackPath);
+        CGContextSetRGBFillColor(ctx, 1.0, 1.0, 1.0, 0.10);
+        CGContextFillPath(ctx);
+        CGPathRelease(trackPath);
+        // Thumb
+        CGMutablePathRef thumbPath = CGPathCreateMutable();
+        CGPathAddRoundedRect(thumbPath, nullptr,
+            CGRectMake(trackX, thumbY, trackW, thumbH), 2.0, 2.0);
+        CGContextAddPath(ctx, thumbPath);
+        CGContextSetRGBFillColor(ctx, 1.0, 1.0, 1.0, 0.42);
+        CGContextFillPath(ctx);
+        CGPathRelease(thumbPath);
+        CGContextRestoreGState(ctx);
     }
 }
 
@@ -533,6 +602,17 @@ bool Renderer::init(void* view, int w, int h) {
                 }
                 if (g_view) [g_view setNeedsDisplay:YES];
             };
+
+            // ── Scroll ───────────────────────────────────────────────────────
+            // scrollingDeltaY: positive = scroll up (see content above) → offset--.
+            // The shelf height is capped at 7 rows in application.cpp, so
+            // scrolling kicks in only when the user has more than 7 rows of items.
+            rv.ddScrollBlock = ^(CGFloat deltaY) {
+                if (g_maxScrollOffset <= 0.0) return;
+                g_scrollOffsetY = std::max(0.0,
+                    std::min(g_scrollOffsetY - deltaY, g_maxScrollOffset));
+                if (g_view) [g_view setNeedsDisplay:YES];
+            };
         }
     }
 
@@ -547,9 +627,13 @@ void Renderer::shutdown() {
         rv.ddHitTestBlock     = nil;
         rv.ddHandleClickBlock = nil;
         rv.ddDragOutBlock     = nil;
+        rv.ddRubberBandBlock  = nil;
+        rv.ddScrollBlock      = nil;
     }
-    g_view = nil;
-    ok_    = false;
+    g_view            = nil;
+    ok_               = false;
+    g_scrollOffsetY   = 0.0;
+    g_maxScrollOffset = 0.0;
     g_selectedIndices.clear();
     g_tileRects.clear();
 
@@ -563,6 +647,7 @@ void Renderer::shutdown() {
 void Renderer::setItems(const ItemList& items) {
     *shared_items_ = items;
     g_selectedIndices.clear(); // indices are stale after a list change
+    if (items.empty()) g_scrollOffsetY = 0.0; // reset scroll position on clear
     if (ok_ && g_view) [g_view setNeedsDisplay:YES];
 }
 

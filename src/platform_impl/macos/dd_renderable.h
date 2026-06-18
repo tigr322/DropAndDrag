@@ -20,4 +20,7 @@
 // Called continuously during a rubber-band drag with the current selection rect.
 // The renderer updates g_selectedIndices and triggers a redraw.
 @property (nonatomic, copy, nullable) void (^ddRubberBandBlock)(NSRect selRect);
+// Called from scrollWheel: with the scroll delta in points (can be fractional).
+// Positive deltaY = user scrolls up (natural scrolling: see content above).
+@property (nonatomic, copy, nullable) void (^ddScrollBlock)(CGFloat deltaY);
 @end

@@ -406,13 +406,16 @@ bool Application::init_ui() {
         }
         renderer_->setItems(items);
 
-        // Resize window to fit a multi-row grid (max 5 columns, height grows per row).
+        // Resize window to fit a multi-row grid (max 5 columns).
+        // Height is capped at 7 visible rows; the renderer scrolls beyond that.
         int n        = static_cast<int>(items.size());
-        constexpr int kMaxCols = 5;
+        constexpr int kMaxCols        = 5;
+        constexpr int kMaxVisibleRows = 7;
         int cols     = std::max(1, std::min(n, kMaxCols));
         int needed_w = std::max(200, cols * 64 + 24);
         int rows     = (n + cols - 1) / cols;
-        int needed_h = std::max(120, 32 + rows * 62 + (rows - 1) * 10 + 14);
+        int visRows  = std::min(rows, kMaxVisibleRows);
+        int needed_h = std::max(120, 32 + visRows * 62 + (visRows - 1) * 10 + 14);
         auto b = native_window_->getBounds();
         int cx = b.x + b.width  / 2;
         int cy = b.y + b.height / 2;
