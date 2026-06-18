@@ -21,7 +21,7 @@ brew tap tigr322/tap
 brew install --cask dropanddrag
 ```
 
-**Direct DMG:** [DropAndDrag-1.0.2-macOS.dmg](https://github.com/tigr322/DropAndDrag/releases/latest/download/DropAndDrag-1.0.2-macOS.dmg)
+**Direct DMG:** [DropAndDrag-1.0.4-macOS.dmg](https://github.com/tigr322/DropAndDrag/releases/download/v1.0.4/DropAndDrag-1.0.4-macOS.dmg)
 
 > **First launch:** macOS blocks unsigned apps.  
 > Go to **System Settings → Privacy & Security** → scroll down → **Open Anyway**.
