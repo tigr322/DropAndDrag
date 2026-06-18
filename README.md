@@ -47,8 +47,8 @@
 
 ### Windows
 
-- Installer: [DropAndDragSetup.exe](https://github.com/anomalyco/DropAndDrag/releases/latest/download/DropAndDragSetup.exe)
-- Portable (.zip): [DropAndDrag.zip](https://github.com/anomalyco/DropAndDrag/releases/latest/download/DropAndDrag.zip)
+- Installer: [DropAndDragSetup.exe](https://github.com/tigr322/DropAndDrag/releases/latest/download/DropAndDragSetup.exe)
+- Portable (.zip): [DropAndDrag.zip](https://github.com/tigr322/DropAndDrag/releases/latest/download/DropAndDrag.zip)
 - Install via Winget *(coming soon)*:
   ```powershell
   winget install DropAndDrag
@@ -56,27 +56,29 @@
 
 ### macOS
 
-- DMG installer: [DropAndDrag.dmg](https://github.com/anomalyco/DropAndDrag/releases/latest/download/DropAndDrag.dmg)
-- Install via Homebrew *(coming soon)*:
-  ```bash
-  brew install --cask dropanddrag
-  ```
+**Homebrew (recommended):**
+```bash
+brew tap tigr322/tap
+brew install --cask dropanddrag
+open /Applications/DropAndDrag.app
+```
 
-> **Note for macOS users**
->
-> This app is **unsigned**. macOS will block it.
->
-> To run it:
-> ```bash
-> sudo xattr -dr com.apple.quarantine /Applications/DropAndDrag.app
-> ```
-> Or allow it via: **System Settings → Privacy & Security → Open Anyway**
+**Direct download:**
+```bash
+curl -fsSL https://raw.githubusercontent.com/tigr322/DropAndDrag/main/install.sh | bash
+```
+
+**DMG:** [DropAndDrag.dmg](https://github.com/tigr322/DropAndDrag/releases/latest/download/DropAndDrag-1.0.2-macOS.dmg)
+
+> **First launch:** macOS will block unsigned apps.  
+> Go to **System Settings → Privacy & Security** → scroll down → **Open Anyway**.  
+> Then **System Settings → Accessibility** → enable DropAndDrag for shake-to-open.
 
 ### Linux
 
-- AppImage: [DropAndDrag.AppImage](https://github.com/anomalyco/DropAndDrag/releases/latest/download/DropAndDrag.AppImage)
-- DEB package: [dropanddrag.deb](https://github.com/anomalyco/DropAndDrag/releases/latest/download/dropanddrag.deb)
-- RPM package: [dropanddrag.rpm](https://github.com/anomalyco/DropAndDrag/releases/latest/download/dropanddrag.rpm)
+- AppImage: [DropAndDrag.AppImage](https://github.com/tigr322/DropAndDrag/releases/latest/download/DropAndDrag.AppImage)
+- DEB package: [dropanddrag.deb](https://github.com/tigr322/DropAndDrag/releases/latest/download/dropanddrag.deb)
+- RPM package: [dropanddrag.rpm](https://github.com/tigr322/DropAndDrag/releases/latest/download/dropanddrag.rpm)
 - Install via Flatpak *(coming soon)*:
   ```bash
   flatpak install dropanddrag
@@ -108,7 +110,7 @@
 
 ```bash
 # Clone
-git clone https://github.com/anomalyco/DropAndDrag.git
+git clone https://github.com/tigr322/DropAndDrag.git
 cd DropAndDrag
 
 # macOS / Linux
@@ -264,7 +266,7 @@ DropAndDrag is engineered to be the fastest shelf utility on any platform.
 
 ## License
 
-MIT © [DropAndDrag contributors](https://github.com/anomalyco/DropAndDrag/graphs/contributors)
+MIT © [DropAndDrag contributors](https://github.com/tigr322/DropAndDrag/graphs/contributors)
 
 ---
 

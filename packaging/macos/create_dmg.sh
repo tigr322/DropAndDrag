@@ -43,13 +43,19 @@ DMG_PATH="dist/${DMG_NAME}"
 
 rm -f "${DMG_PATH}"
 
+DMG_ROOT="$(mktemp -d)"
+cp -R "${STAGING_DIR}" "${DMG_ROOT}/"
+ln -s /Applications "${DMG_ROOT}/Applications"
+
 hdiutil create \
     -volname "${APP_NAME}" \
-    -srcfolder "$(dirname "${STAGING_DIR}")" \
+    -srcfolder "${DMG_ROOT}" \
     -ov \
     -format UDZO \
     -imagekey zlib-level=9 \
     "${DMG_PATH}"
+
+rm -rf "${DMG_ROOT}"
 
 if [ -n "${DEVELOPER_ID_APPLICATION:-}" ]; then
     echo "=== Signing DMG ==="
