@@ -1,6 +1,6 @@
 cask "dropanddrag" do
   version "1.0.2"
-  sha256 arm:   "74096eb10a06b463822adbcb233b80deacbcc462e1bcf32b9a07785857be0642",
+  sha256 arm:   "c6d076266cbd501c169159e50fbe8323747ca76d17592e2283d98feb8e7f3901",
          intel: "PLACEHOLDER_X64_SHA256"
 
   url "https://github.com/tigr322/DropAndDrag/releases/download/v#{version}/DropAndDrag-#{version}-macOS.dmg"
@@ -15,7 +15,13 @@ cask "dropanddrag" do
   postflight do
     system_command "/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister",
                    args: ["-f", "#{appdir}/DropAndDrag.app"]
+    system_command "xattr", args: ["-dr", "com.apple.quarantine", "#{appdir}/DropAndDrag.app"], sudo: true
   end
+
+  caveats <<~EOS
+    For shake-to-open: System Settings → Privacy & Security → Accessibility → enable DropAndDrag
+    If the app doesn't appear in the list, click + and add DropAndDrag.app from /Applications
+  EOS
 
   zap trash: [
     "~/Library/Application Support/DropAndDrag",
