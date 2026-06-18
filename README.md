@@ -7,10 +7,10 @@
 
 > A lightweight drag-and-drop shelf for macOS. Drop files, folders, images, text, and URLs — pick them up anywhere.
 
-- **Shake while dragging** to open the shelf and drop items inside
+- **Shake while dragging a file** to open the shelf and drop it inside
 - Drag items **out** to any app or folder
 - **Cmd+Click** to select multiple items and drag them all at once
-- Shelf hides automatically while you drag, restores when you're done
+- Shelf hides while you drag out, reappears when the drag ends
 - Always on top, never steals focus
 
 ## Download
@@ -35,7 +35,7 @@ brew install --cask dropanddrag
 - **Real icons** — file icons via system API, image thumbnails via QuickLook, favicons for URLs
 - **Multi-select** — Cmd+Click tiles to select multiple items; drag them all out at once
 - **Auto-sizing** — shelf grows as you add items, resets when cleared
-- **Shake-to-open** — shake the mouse while dragging to summon the shelf near the cursor
+- **Shake-to-open** — shake the mouse while dragging a file to summon the shelf near the cursor; ignored when the shelf is already visible
 - **System tray** — Show/Hide and Quit from the menu bar icon
 - **Persistent settings** — window position and preferences saved to disk
 - **Zero telemetry** — no network access, no cloud, everything stays local
@@ -43,9 +43,10 @@ brew install --cask dropanddrag
 ## How it works
 
 1. Drag a file (or text, URL, image) onto the shelf — it appears as a tile with its real icon
-2. Keep working. The shelf floats above all windows
+2. Keep working. The shelf floats above all windows and never steals focus
 3. When you're ready, drag the tile to its destination
-4. The shelf hides while you drag so it doesn't obstruct the drop target, then reappears
+4. The shelf hides while you drag out so it doesn't obstruct the drop target, then reappears automatically
+5. To move the shelf, drag its background. To bring it back when hidden, shake the mouse while dragging a file
 
 ## Technical details
 
