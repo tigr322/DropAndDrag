@@ -360,8 +360,7 @@ bool Application::init_mouse_shake() {
         int h = std::max(60, settings_->shelf_position_height());
         native_window_->positionNearCursor(w, h);
         native_window_->setAlwaysOnTop(true);
-        native_window_->show();
-        renderer_->render(0);
+        native_window_->show(); // orderFrontRegardless triggers drawRect: automatically
     });
 
     if (!start_mouse_monitor(*shake_detector_)) {
@@ -420,8 +419,8 @@ bool Application::init_ui() {
         int cx = b.x + b.width  / 2;
         int cy = b.y + b.height / 2;
         native_window_->setBounds(cx - needed_w / 2, cy - needed_h / 2, needed_w, needed_h);
-
-        renderer_->render(0);
+        // setItems() already called setNeedsDisplay:YES; setBounds triggers its own
+        // redraw via setFrame:display:YES — no explicit render() call needed here.
     });
 
     // ── Clear callback — reset window to default width ────────────────────────

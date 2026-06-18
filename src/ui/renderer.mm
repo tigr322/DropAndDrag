@@ -5,6 +5,9 @@
 #include <core/items/item.hpp>
 #include <algorithm>
 #include <set>
+#include <string>
+#include <unordered_map>
+#include <unordered_set>
 
 // ─── File-scope globals ───────────────────────────────────────────────────────
 
@@ -14,43 +17,46 @@ static int     g_h    = 120;
 
 // Updated by drawShelf every frame; read by all interaction blocks.
 // Main-thread only — no locking needed.
-static std::vector<NSRect> g_tileRects;                  // icon rect per item (multi-row)
-static NSRect          g_clearBtnRect = {};
-static NSRect          g_hideBtnRect  = {};
-static std::set<size_t> g_selectedIndices;   // currently selected tile indices
+static std::vector<NSRect> g_tileRects;
+static NSRect              g_clearBtnRect = {};
+static NSRect              g_hideBtnRect  = {};
+static std::set<size_t>    g_selectedIndices;
 
 // Scroll state — updated by drawShelf, mutated by ddScrollBlock.
-static CGFloat g_scrollOffsetY   = 0.0; // current scroll position in pixels
-static CGFloat g_maxScrollOffset = 0.0; // max allowed offset (0 = no overflow)
-static CGFloat g_contentClipY0   = 32.0; // top of the scrollable content area
+static CGFloat g_scrollOffsetY   = 0.0;
+static CGFloat g_maxScrollOffset = 0.0;
+static CGFloat g_contentClipY0   = 32.0;
 
-// ─── Caches — main thread only ───────────────────────────────────────────────
+// ─── Image caches — C++ maps to avoid per-frame NSString key allocations ──────
+// All accessed on the main thread only (completion handlers dispatch_async back).
 
-static NSMutableDictionary<NSString*, NSImage*>* g_iconCache;
-static NSMutableDictionary<NSString*, NSImage*>* g_thumbCache;
-static NSMutableDictionary<NSString*, NSImage*>* g_faviconCache;
-static NSMutableSet<NSString*>*                  g_pendingThumbs;
-static NSMutableSet<NSString*>*                  g_pendingFavicons;
-// Limits simultaneous QLThumbnailGenerator requests. Without this, dropping
-// 50 images fires 50 concurrent async requests. Value 4 keeps throughput
-// high while avoiding system-level resource contention.
+static std::unordered_map<std::string, NSImage*> g_iconCache;    // path   → system icon
+static std::unordered_map<std::string, NSImage*> g_thumbCache;   // uuid   → QL thumbnail
+static std::unordered_map<std::string, NSImage*> g_faviconCache; // domain → favicon
+static std::unordered_set<std::string>           g_pendingThumbs;
+static std::unordered_set<std::string>           g_pendingFavicons;
+// At most 4 simultaneous QL thumbnail requests; extras queue behind the semaphore.
 static dispatch_semaphore_t g_thumbSemaphore;
 
-static void ensureCaches(void) {
-    if (!g_iconCache)       g_iconCache      = [NSMutableDictionary dictionary];
-    if (!g_thumbCache)      g_thumbCache     = [NSMutableDictionary dictionary];
-    if (!g_faviconCache)    g_faviconCache   = [NSMutableDictionary dictionary];
-    if (!g_pendingThumbs)   g_pendingThumbs  = [NSMutableSet set];
-    if (!g_pendingFavicons) g_pendingFavicons = [NSMutableSet set];
-    if (!g_thumbSemaphore)  g_thumbSemaphore = dispatch_semaphore_create(4);
-}
+// ─── Label cache — invalidated on every setItems() ───────────────────────────
+// Stores the truncated display string and its pre-measured pixel width so
+// sizeWithAttributes: (a full text-layout pass) runs at most once per item
+// rather than once per tile per frame.
 
-// ─── systemIconForPath ───────────────────────────────────────────────────────
+struct LabelEntry { NSString* text; CGFloat width; };
+static std::unordered_map<std::string, LabelEntry> g_labelCache;
+
+// ─── Background path cache — rebuilt only when the window is resized ──────────
+
+static CGPathRef g_bgPath   = nullptr;
+static CGRect    g_bgBounds = {};
+
+// ─── systemIconForPath ────────────────────────────────────────────────────────
 
 static NSImage* systemIconForPath(NSString* path) {
-    NSString* key = (path.length > 0) ? path : @"__generic__";
-    NSImage* hit = g_iconCache[key];
-    if (hit) return hit;
+    std::string key = (path.length > 0) ? path.UTF8String : "__generic__";
+    auto it = g_iconCache.find(key);
+    if (it != g_iconCache.end()) return it->second;
     NSImage* icon = (path.length > 0)
         ? [[NSWorkspace sharedWorkspace] iconForFile:path]
         : [[NSWorkspace sharedWorkspace] iconForFileType:@"public.data"];
@@ -59,11 +65,12 @@ static NSImage* systemIconForPath(NSString* path) {
     return icon;
 }
 
-// ─── requestThumbnail ────────────────────────────────────────────────────────
+// ─── requestThumbnail ─────────────────────────────────────────────────────────
 
 static void requestThumbnail(NSString* filePath, NSString* uuid) {
-    if ([g_pendingThumbs containsObject:uuid]) return;
-    [g_pendingThumbs addObject:uuid];
+    std::string uuidKey = uuid.UTF8String;
+    if (g_pendingThumbs.count(uuidKey)) return;
+    g_pendingThumbs.insert(uuidKey);
 
     if (@available(macOS 10.15, *)) {
         NSURL* url = [NSURL fileURLWithPath:filePath];
@@ -73,33 +80,37 @@ static void requestThumbnail(NSString* filePath, NSString* uuid) {
                              size:CGSizeMake(96, 96)
                             scale:2.0
                 representationTypes:QLThumbnailGenerationRequestRepresentationTypeThumbnail];
-        // Dispatch to a background thread so the semaphore wait doesn't block
-        // the main thread. At most 4 QL requests run simultaneously; extras
-        // queue behind the semaphore and proceed as slots free up.
+        // Wait behind the semaphore on a background thread so the main thread
+        // is never blocked. At most 4 QL requests run at once.
         dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
             dispatch_semaphore_wait(g_thumbSemaphore, DISPATCH_TIME_FOREVER);
             [[QLThumbnailGenerator sharedGenerator]
                 generateBestRepresentationForRequest:req
                 completionHandler:^(QLThumbnailRepresentation* rep, NSError* err) {
-                    dispatch_semaphore_signal(g_thumbSemaphore); // release slot
+                    dispatch_semaphore_signal(g_thumbSemaphore);
                     NSImage* img = (!err && rep) ? rep.NSImage : nil;
                     dispatch_async(dispatch_get_main_queue(), ^{
-                        if (img) { [img setSize:NSMakeSize(48, 48)]; g_thumbCache[uuid] = img; }
-                        else     [g_pendingThumbs removeObject:uuid];
+                        if (img) {
+                            [img setSize:NSMakeSize(48, 48)];
+                            g_thumbCache[uuidKey] = img;
+                        } else {
+                            g_pendingThumbs.erase(uuidKey);
+                        }
                         if (g_view) [g_view setNeedsDisplay:YES];
                     });
                 }];
         });
     } else {
-        [g_pendingThumbs removeObject:uuid];
+        g_pendingThumbs.erase(uuidKey);
     }
 }
 
-// ─── requestFavicon ──────────────────────────────────────────────────────────
+// ─── requestFavicon ───────────────────────────────────────────────────────────
 
 static void requestFavicon(NSString* domain) {
-    if ([g_pendingFavicons containsObject:domain]) return;
-    [g_pendingFavicons addObject:domain];
+    std::string domainKey = domain.UTF8String;
+    if (g_pendingFavicons.count(domainKey)) return;
+    g_pendingFavicons.insert(domainKey);
 
     NSURL* url = [NSURL URLWithString:
         [NSString stringWithFormat:
@@ -110,14 +121,14 @@ static void requestFavicon(NSString* domain) {
             NSImage* img = (!err && data.length > 0)
                 ? [[NSImage alloc] initWithData:data] : nil;
             dispatch_async(dispatch_get_main_queue(), ^{
-                if (img) g_faviconCache[domain] = img;
-                else     [g_pendingFavicons removeObject:domain];
+                if (img) g_faviconCache[domainKey] = img;
+                else     g_pendingFavicons.erase(domainKey);
                 if (g_view) [g_view setNeedsDisplay:YES];
             });
         }] resume];
 }
 
-// ─── iconForItem ─────────────────────────────────────────────────────────────
+// ─── iconForItem ──────────────────────────────────────────────────────────────
 
 static NSImage* iconForItem(const dd::Item& item) {
     switch (item.data.type) {
@@ -129,12 +140,12 @@ static NSImage* iconForItem(const dd::Item& item) {
             return systemIconForPath(path);
         }
         case dd::ItemType::Image: {
-            NSString* uuid = [NSString stringWithUTF8String:item.data.uuid.c_str()];
-            NSImage* thumb = g_thumbCache[uuid];
-            if (thumb) return thumb;
+            auto it = g_thumbCache.find(item.data.uuid);
+            if (it != g_thumbCache.end()) return it->second;
             if (item.data.path.has_value())
                 requestThumbnail(
-                    [NSString stringWithUTF8String:item.data.path->c_str()], uuid);
+                    [NSString stringWithUTF8String:item.data.path->c_str()],
+                    [NSString stringWithUTF8String:item.data.uuid.c_str()]);
             NSString* path = item.data.path.has_value()
                 ? [NSString stringWithUTF8String:item.data.path->c_str()]
                 : @"";
@@ -147,11 +158,12 @@ static NSImage* iconForItem(const dd::Item& item) {
             else if (item.data.text_content.has_value())
                 urlStr = [NSString stringWithUTF8String:item.data.text_content->c_str()];
             if (urlStr.length > 0) {
-                NSString* domain = [NSURL URLWithString:urlStr].host;
-                if (domain.length > 0) {
-                    NSImage* fav = g_faviconCache[domain];
-                    if (fav) return fav;
-                    requestFavicon(domain);
+                NSString* hostNS = [NSURL URLWithString:urlStr].host;
+                if (hostNS.length > 0) {
+                    std::string domain = hostNS.UTF8String;
+                    auto it = g_faviconCache.find(domain);
+                    if (it != g_faviconCache.end()) return it->second;
+                    requestFavicon(hostNS);
                 }
             }
             return [NSImage imageNamed:NSImageNameNetwork];
@@ -187,24 +199,18 @@ static void drawColoredTile(NSRect r, const dd::Item& item) {
 
 // ─── Geometry helpers ─────────────────────────────────────────────────────────
 
-// Layout constants
 static const CGFloat kStep  = 64.0;
 static const CGFloat kIconW = 48.0;
 static const CGFloat kIconH = 48.0;
-static const CGFloat kTileH  = 62.0; // icon + label row height
-static const CGFloat kRowGap = 10.0; // vertical gap between rows
+static const CGFloat kTileH  = 62.0;
+static const CGFloat kRowGap = 10.0;
 static const CGFloat kBtnSz  = 18.0;
 static const CGFloat kBtnMg = 7.0;
 
-// Returns the tile index under `pt`, or -1 if none.
-// Searches g_tileRects (filled by drawShelf) — works for any number of rows.
-// Ignores clicks above g_contentClipY0 (the header button strip) so that
-// scrolled-up tiles can never be hit-tested through the header.
 static NSInteger hitTestItemAt(NSPoint pt, NSUInteger count) {
     if (count == 0 || g_tileRects.size() < count) return -1;
-    if (pt.y < g_contentClipY0) return -1; // above scrollable area
+    if (pt.y < g_contentClipY0) return -1;
     for (NSUInteger i = 0; i < count; ++i) {
-        // Hit area covers the icon plus the label row below it.
         NSRect r = NSMakeRect(g_tileRects[i].origin.x, g_tileRects[i].origin.y,
                               kIconW, kTileH);
         if (NSPointInRect(pt, r)) return (NSInteger)i;
@@ -215,16 +221,30 @@ static NSInteger hitTestItemAt(NSPoint pt, NSUInteger count) {
 // ─── drawShelf ────────────────────────────────────────────────────────────────
 
 static void drawShelf(CGContextRef ctx, CGRect bounds, const dd::ItemList& items) {
-    ensureCaches();
+    // ── Static attribute dictionaries (allocated once, never per-frame) ───────
+    static NSDictionary* labelAttrs;
+    if (!labelAttrs) labelAttrs = @{
+        NSFontAttributeName:            [NSFont systemFontOfSize:10],
+        NSForegroundColorAttributeName: [NSColor colorWithWhite:0.9 alpha:1.0]
+    };
+    static NSDictionary* hintAttrs;
+    if (!hintAttrs) hintAttrs = @{
+        NSFontAttributeName:            [NSFont systemFontOfSize:13],
+        NSForegroundColorAttributeName: [NSColor colorWithWhite:0.75 alpha:0.55]
+    };
 
-    // Background
+    // ── Background (CGPath cached, rebuilt only on resize) ────────────────────
     CGContextSetRGBFillColor(ctx, 0.0, 0.0, 0.0, 0.55);
-    CGRect bg = CGRectInset(bounds, 2, 2);
-    CGMutablePathRef bgPath = CGPathCreateMutable();
-    CGPathAddRoundedRect(bgPath, nullptr, bg, 14, 14);
-    CGContextAddPath(ctx, bgPath);
+    if (!g_bgPath || !CGRectEqualToRect(bounds, g_bgBounds)) {
+        if (g_bgPath) CGPathRelease(g_bgPath);
+        CGMutablePathRef mp = CGPathCreateMutable();
+        CGPathAddRoundedRect(mp, nullptr, CGRectInset(bounds, 2, 2), 14, 14);
+        g_bgPath   = CGPathCreateCopy(mp);
+        CGPathRelease(mp);
+        g_bgBounds = bounds;
+    }
+    CGContextAddPath(ctx, g_bgPath);
     CGContextFillPath(ctx);
-    CGPathRelease(bgPath);
 
     NSUInteger n = items.size();
 
@@ -234,7 +254,6 @@ static void drawShelf(CGContextRef ctx, CGRect bounds, const dd::ItemList& items
         NSBezierPath* circle = [NSBezierPath bezierPathWithOvalInRect:g_hideBtnRect];
         [[NSColor colorWithRed:0.98 green:0.74 blue:0.18 alpha:0.90] setFill];
         [circle fill];
-        // Minus symbol
         CGContextSaveGState(ctx);
         CGContextSetStrokeColorWithColor(ctx,
             [[NSColor colorWithRed:0.55 green:0.40 blue:0.02 alpha:0.85] CGColor]);
@@ -269,9 +288,6 @@ static void drawShelf(CGContextRef ctx, CGRect bounds, const dd::ItemList& items
     }
 
     // ── Scroll-aware multi-row layout ─────────────────────────────────────────
-    // When all rows fit, centers them vertically (no scroll).
-    // When content overflows, top-aligns and offsets by g_scrollOffsetY.
-    // g_contentClipY0 marks the top of the item grid (below the header buttons).
     {
         const CGFloat margin    = 12.0;
         const CGFloat bottomPad = 14.0;
@@ -286,12 +302,10 @@ static void drawShelf(CGContextRef ctx, CGRect bounds, const dd::ItemList& items
 
         CGFloat startY;
         if (groupH <= visibleH) {
-            // All rows fit — center vertically, no scroll needed.
             startY            = std::max(topReserved, (bounds.size.height - groupH) / 2.0);
             g_scrollOffsetY   = 0.0;
             g_maxScrollOffset = 0.0;
         } else {
-            // Content overflows — top-align and apply scroll offset.
             g_maxScrollOffset = groupH - visibleH;
             g_scrollOffsetY   = std::max(0.0, std::min(g_scrollOffsetY, g_maxScrollOffset));
             startY            = topReserved - g_scrollOffsetY;
@@ -301,7 +315,6 @@ static void drawShelf(CGContextRef ctx, CGRect bounds, const dd::ItemList& items
         for (NSUInteger i = 0; i < n; ++i) {
             NSInteger row = (NSInteger)i / cols;
             NSInteger col = (NSInteger)i % cols;
-            // Last row may have fewer items — center it independently.
             NSInteger itemsInRow = (row == rows - 1)
                 ? (NSInteger)n - row * cols : cols;
             CGFloat rowW = (CGFloat)(itemsInRow - 1) * kStep + kIconW;
@@ -315,25 +328,21 @@ static void drawShelf(CGContextRef ctx, CGRect bounds, const dd::ItemList& items
 
     // ── Empty state ───────────────────────────────────────────────────────────
     if (n == 0) {
-        NSDictionary* hint = @{
-            NSFontAttributeName: [NSFont systemFontOfSize:13],
-            NSForegroundColorAttributeName: [NSColor colorWithWhite:0.75 alpha:0.55]
-        };
-        NSString* msg = @"Drop files here";
-        NSSize ms = [msg sizeWithAttributes:hint];
-        [msg drawAtPoint:NSMakePoint((bounds.size.width  - ms.width)  / 2,
-                                      (bounds.size.height - ms.height) / 2)
-           withAttributes:hint];
+        static NSString* dropMsg    = @"Drop files here";
+        static CGFloat   dropMsgW   = -1;
+        static CGFloat   dropMsgH   = -1;
+        if (dropMsgW < 0) {
+            NSSize s  = [dropMsg sizeWithAttributes:hintAttrs];
+            dropMsgW  = s.width;
+            dropMsgH  = s.height;
+        }
+        [dropMsg drawAtPoint:NSMakePoint((bounds.size.width  - dropMsgW) / 2,
+                                          (bounds.size.height - dropMsgH) / 2)
+               withAttributes:hintAttrs];
         return;
     }
 
     // ── Item tiles (clipped to the scrollable content area) ───────────────────
-    NSDictionary* labelAttrs = @{
-        NSFontAttributeName: [NSFont systemFontOfSize:10],
-        NSForegroundColorAttributeName: [NSColor colorWithWhite:0.9 alpha:1.0]
-    };
-
-    // Clip drawing so scrolled-out tiles don't bleed into the header strip.
     CGContextSaveGState(ctx);
     CGContextClipToRect(ctx, CGRectMake(0, g_contentClipY0,
                                          bounds.size.width,
@@ -341,14 +350,12 @@ static void drawShelf(CGContextRef ctx, CGRect bounds, const dd::ItemList& items
 
     for (NSUInteger i = 0; i < n; ++i) {
         NSRect iconRect = g_tileRects[i];
-        // Skip tiles completely outside the visible band (optimisation).
         if (iconRect.origin.y + kTileH <= g_contentClipY0) continue;
         if (iconRect.origin.y >= bounds.size.height)        continue;
 
         const auto& item = items[i];
         bool selected = g_selectedIndices.count(i) > 0;
 
-        // Selection highlight behind the icon.
         if (selected) {
             CGContextSaveGState(ctx);
             CGMutablePathRef selPath = CGPathCreateMutable();
@@ -361,7 +368,6 @@ static void drawShelf(CGContextRef ctx, CGRect bounds, const dd::ItemList& items
             CGContextRestoreGState(ctx);
         }
 
-        // Icon (clipped to rounded rect).
         NSImage* icon = iconForItem(item);
         if (icon) {
             CGContextSaveGState(ctx);
@@ -381,7 +387,6 @@ static void drawShelf(CGContextRef ctx, CGRect bounds, const dd::ItemList& items
             drawColoredTile(iconRect, item);
         }
 
-        // Selection border on top of icon.
         if (selected) {
             NSBezierPath* border = [NSBezierPath
                 bezierPathWithRoundedRect:NSInsetRect(iconRect, 1.5, 1.5)
@@ -391,37 +396,39 @@ static void drawShelf(CGContextRef ctx, CGRect bounds, const dd::ItemList& items
             [border stroke];
         }
 
-        // Label — truncate on NSString (character-aware, not byte-count).
-        // Truncating std::string by bytes splits multi-byte UTF-8 sequences,
-        // making stringWithUTF8String: return nil → label invisible.
-        std::string name = item.data.file_name.value_or(
-            item.data.title.value_or(item.data.text_content.value_or("item")));
-        NSString* nStr = [NSString stringWithUTF8String:name.c_str()] ?: @"???";
-        if (nStr.length > 16)
-            nStr = [[nStr substringToIndex:14] stringByAppendingString:@"…"];
-        NSSize ns = [nStr sizeWithAttributes:labelAttrs];
-        [nStr drawAtPoint:NSMakePoint(iconRect.origin.x + (kIconW - ns.width) / 2,
-                                       iconRect.origin.y + kIconH + 2)
-           withAttributes:labelAttrs];
+        // Label — looked up from cache; sizeWithAttributes: is never called
+        // here after the first frame (the LabelEntry is populated once then reused).
+        auto lit = g_labelCache.find(item.data.uuid);
+        if (lit == g_labelCache.end()) {
+            std::string name = item.data.file_name.value_or(
+                item.data.title.value_or(item.data.text_content.value_or("item")));
+            NSString* nStr = [NSString stringWithUTF8String:name.c_str()] ?: @"???";
+            if (nStr.length > 16)
+                nStr = [[nStr substringToIndex:14] stringByAppendingString:@"…"];
+            CGFloat w = [nStr sizeWithAttributes:labelAttrs].width;
+            g_labelCache[item.data.uuid] = {nStr, w};
+            lit = g_labelCache.find(item.data.uuid);
+        }
+        const LabelEntry& lbl = lit->second;
+        [lbl.text drawAtPoint:NSMakePoint(iconRect.origin.x + (kIconW - lbl.width) / 2,
+                                           iconRect.origin.y + kIconH + 2)
+               withAttributes:labelAttrs];
     }
 
     CGContextRestoreGState(ctx); // restore content-area clip
 
     // ── Scrollbar ─────────────────────────────────────────────────────────────
-    // Drawn on top, outside the clip, only when content overflows.
     if (g_maxScrollOffset > 0.0) {
-        const CGFloat trackW   = 4.0;
-        const CGFloat trackPad = 5.0;
+        const CGFloat trackW    = 4.0;
+        const CGFloat trackPad  = 5.0;
         const CGFloat bottomPad = 14.0;
         CGFloat trackX  = bounds.size.width - trackW - trackPad;
         CGFloat trackY0 = g_contentClipY0 + 4.0;
         CGFloat trackH  = bounds.size.height - g_contentClipY0 - bottomPad - 4.0;
-        // Thumb size is proportional to the visible fraction of content.
         CGFloat thumbH  = std::max(20.0, trackH * trackH / (trackH + g_maxScrollOffset));
         CGFloat thumbY  = trackY0 + (trackH - thumbH) * (g_scrollOffsetY / g_maxScrollOffset);
 
         CGContextSaveGState(ctx);
-        // Track (barely visible)
         CGMutablePathRef trackPath = CGPathCreateMutable();
         CGPathAddRoundedRect(trackPath, nullptr,
             CGRectMake(trackX, trackY0, trackW, trackH), 2.0, 2.0);
@@ -429,7 +436,7 @@ static void drawShelf(CGContextRef ctx, CGRect bounds, const dd::ItemList& items
         CGContextSetRGBFillColor(ctx, 1.0, 1.0, 1.0, 0.10);
         CGContextFillPath(ctx);
         CGPathRelease(trackPath);
-        // Thumb
+
         CGMutablePathRef thumbPath = CGPathCreateMutable();
         CGPathAddRoundedRect(thumbPath, nullptr,
             CGRectMake(trackX, thumbY, trackW, thumbH), 2.0, 2.0);
@@ -451,6 +458,9 @@ bool Renderer::init(void* view, int w, int h) {
     width_ = w; height_ = h;
     g_w = w; g_h = h;
 
+    // Initialize the thumbnail semaphore once here, not on every drawRect:.
+    if (!g_thumbSemaphore) g_thumbSemaphore = dispatch_semaphore_create(4);
+
     if (view) {
         g_view = (__bridge NSView*)view;
         auto si = shared_items_;
@@ -464,8 +474,7 @@ bool Renderer::init(void* view, int w, int h) {
                 drawShelf(ctx, boundsIn, *si);
             };
 
-            // ── Hit-test (mouseDownCanMoveWindow) ─────────────────────────────
-            // Returns YES for buttons and tiles → prevents window drag on those.
+            // ── Hit-test ──────────────────────────────────────────────────────
             rv.ddHitTestBlock = ^BOOL(NSPoint pt) {
                 if (NSPointInRect(pt, g_hideBtnRect))  return YES;
                 if (!NSEqualRects(g_clearBtnRect, NSZeroRect) &&
@@ -474,16 +483,11 @@ bool Renderer::init(void* view, int w, int h) {
             };
 
             // ── Click handling ───────────────────────────────────────────────
-            // Handles buttons and selection changes.
-            // Returns YES to consume (skip normal mouseDown:); NO to let
-            // mouseDown: continue (needed so _mouseDownPt is set for drag).
             rv.ddHandleClickBlock = ^BOOL(NSPoint pt) {
-                // Hide button
                 if (NSPointInRect(pt, g_hideBtnRect)) {
                     if (g_view) [[g_view window] orderOut:nil];
                     return YES;
                 }
-                // Clear button
                 if (!NSEqualRects(g_clearBtnRect, NSZeroRect) &&
                     NSPointInRect(pt, g_clearBtnRect) && !si->empty()) {
                     g_selectedIndices.clear();
@@ -492,28 +496,22 @@ bool Renderer::init(void* view, int w, int h) {
                     if (g_view) [g_view setNeedsDisplay:YES];
                     return YES;
                 }
-                // Item tile — update selection but return NO so mouseDown:
-                // still records _mouseDownPt (needed for drag-out detection).
                 NSInteger idx = hitTestItemAt(pt, si->size());
                 if (idx >= 0) {
                     bool alreadySelected = g_selectedIndices.count((size_t)idx) > 0;
                     bool cmdDown = ([NSEvent modifierFlags] &
                                     NSEventModifierFlagCommand) != 0;
                     if (cmdDown) {
-                        // Toggle
                         if (alreadySelected) g_selectedIndices.erase((size_t)idx);
                         else                 g_selectedIndices.insert((size_t)idx);
                         if (g_view) [g_view setNeedsDisplay:YES];
                     } else if (!alreadySelected || g_selectedIndices.size() <= 1) {
-                        // Select only this one (unless it's already part of a
-                        // multi-selection — we preserve the group for drag).
                         g_selectedIndices.clear();
                         g_selectedIndices.insert((size_t)idx);
                         if (g_view) [g_view setNeedsDisplay:YES];
                     }
-                    return NO; // let mouseDown: set _mouseDownPt
+                    return NO;
                 }
-                // Background click — deselect all
                 if (!g_selectedIndices.empty()) {
                     g_selectedIndices.clear();
                     if (g_view) [g_view setNeedsDisplay:YES];
@@ -522,8 +520,6 @@ bool Renderer::init(void* view, int w, int h) {
             };
 
             // ── Drag-out ─────────────────────────────────────────────────────
-            // If the drag starts on a selected tile, drags ALL selected tiles.
-            // Otherwise drags only the tile under the cursor.
             rv.ddDragOutBlock = ^NSArray<NSDraggingItem*>*(NSPoint pt) {
                 const dd::ItemList& items = *si;
                 if (items.empty()) return nil;
@@ -531,7 +527,6 @@ bool Renderer::init(void* view, int w, int h) {
                 NSInteger clickedIdx = hitTestItemAt(pt, items.size());
                 if (clickedIdx < 0) return nil;
 
-                // Build the set to drag
                 std::vector<size_t> toDrag;
                 if (g_selectedIndices.count((size_t)clickedIdx)) {
                     toDrag.assign(g_selectedIndices.begin(), g_selectedIndices.end());
@@ -547,7 +542,6 @@ bool Renderer::init(void* view, int w, int h) {
                         ? g_tileRects[i]
                         : NSMakeRect(0, 0, kIconW, kIconH);
 
-                    // Drag ghost
                     NSImage* tile = iconForItem(item);
                     if (!tile) {
                         tile = [[NSImage alloc] initWithSize:NSMakeSize(kIconW, kIconH)];
@@ -556,7 +550,6 @@ bool Renderer::init(void* view, int w, int h) {
                         [tile unlockFocus];
                     }
 
-                    // Pasteboard writer
                     id<NSPasteboardWriting> writer = nil;
                     if (item.data.path.has_value()) {
                         writer = [NSURL fileURLWithPath:
@@ -586,9 +579,6 @@ bool Renderer::init(void* view, int w, int h) {
             };
 
             // ── Rubber-band selection ─────────────────────────────────────────
-            // Called every mouseDragged: tick while a rubber-band is active.
-            // Without ⌘: replaces selection with all tiles intersecting selRect.
-            // With ⌘: adds intersecting tiles to the existing selection.
             rv.ddRubberBandBlock = ^(NSRect selRect) {
                 bool cmdDown = ([NSEvent modifierFlags] &
                                 NSEventModifierFlagCommand) != 0;
@@ -604,9 +594,6 @@ bool Renderer::init(void* view, int w, int h) {
             };
 
             // ── Scroll ───────────────────────────────────────────────────────
-            // scrollingDeltaY: positive = scroll up (see content above) → offset--.
-            // The shelf height is capped at 7 rows in application.cpp, so
-            // scrolling kicks in only when the user has more than 7 rows of items.
             rv.ddScrollBlock = ^(CGFloat deltaY) {
                 if (g_maxScrollOffset <= 0.0) return;
                 g_scrollOffsetY = std::max(0.0,
@@ -636,18 +623,23 @@ void Renderer::shutdown() {
     g_maxScrollOffset = 0.0;
     g_selectedIndices.clear();
     g_tileRects.clear();
+    g_labelCache.clear();
 
-    [g_iconCache       removeAllObjects];
-    [g_thumbCache      removeAllObjects];
-    [g_faviconCache    removeAllObjects];
-    [g_pendingThumbs   removeAllObjects];
-    [g_pendingFavicons removeAllObjects];
+    if (g_bgPath) { CGPathRelease(g_bgPath); g_bgPath = nullptr; }
+    g_bgBounds = {};
+
+    g_iconCache.clear();
+    g_thumbCache.clear();
+    g_faviconCache.clear();
+    g_pendingThumbs.clear();
+    g_pendingFavicons.clear();
 }
 
 void Renderer::setItems(const ItemList& items) {
     *shared_items_ = items;
-    g_selectedIndices.clear(); // indices are stale after a list change
-    if (items.empty()) g_scrollOffsetY = 0.0; // reset scroll position on clear
+    g_selectedIndices.clear();
+    g_labelCache.clear(); // item list changed — all cached labels/widths are stale
+    if (items.empty()) g_scrollOffsetY = 0.0;
     if (ok_ && g_view) [g_view setNeedsDisplay:YES];
 }
 
