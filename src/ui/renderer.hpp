@@ -24,12 +24,14 @@ public:
     // the ObjC block installed in init() always sees the latest callback even
     // when setClearCallback is called after init().
     void setClearCallback(std::function<void()> cb);
+    void setHideCallback(std::function<void()> cb);
 private:
     int width_ = 400;
     int height_ = 120;
     bool ok_ = false;
     std::shared_ptr<ItemList>              shared_items_{ std::make_shared<ItemList>() };
     std::shared_ptr<std::function<void()>> clearCallback_{ std::make_shared<std::function<void()>>() };
+    std::shared_ptr<std::function<void()>> hideCallback_{ std::make_shared<std::function<void()>>() };
 };
 
 } // namespace dd

@@ -434,6 +434,14 @@ bool Application::init_ui() {
         native_window_->setBounds(cx - kDefaultW / 2, cy - kDefaultH / 2, kDefaultW, kDefaultH);
     });
 
+    // ── Hide callback — hides window and resets g_shelf_visible so the next
+    // shake is detected. Without this, the CGEventTap guard stays true and
+    // shake never fires again after the first Hide-button press.
+    renderer_->setHideCallback([this]() {
+        native_window_->hide();
+        set_shelf_visible(false);
+    });
+
     // Start with empty shelf (hint text shown by drawShelf when items list is empty).
     renderer_->setItems({});
 

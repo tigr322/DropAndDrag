@@ -467,6 +467,7 @@ bool Renderer::init(void* view, int w, int h) {
         g_view = (__bridge NSView*)view;
         auto si = shared_items_;
         auto cc = clearCallback_;
+        auto hc = hideCallback_;
 
         if ([g_view conformsToProtocol:@protocol(DDRenderable)]) {
             id<DDRenderable> rv = (id<DDRenderable>)g_view;
@@ -487,7 +488,7 @@ bool Renderer::init(void* view, int w, int h) {
             // ── Click handling ───────────────────────────────────────────────
             rv.ddHandleClickBlock = ^BOOL(NSPoint pt) {
                 if (NSPointInRect(pt, g_hideBtnRect)) {
-                    if (g_view) [[g_view window] orderOut:nil];
+                    if (*hc) (*hc)();
                     return YES;
                 }
                 if (!NSEqualRects(g_clearBtnRect, NSZeroRect) &&
@@ -649,6 +650,10 @@ ItemList Renderer::items() const { return *shared_items_; }
 
 void Renderer::setClearCallback(std::function<void()> cb) {
     *clearCallback_ = std::move(cb);
+}
+
+void Renderer::setHideCallback(std::function<void()> cb) {
+    *hideCallback_ = std::move(cb);
 }
 
 void Renderer::render(float) {
