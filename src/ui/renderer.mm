@@ -324,11 +324,14 @@ static void drawShelf(CGContextRef ctx, CGRect bounds, const dd::ItemList& items
             [border stroke];
         }
 
-        // Label
+        // Label — truncate on NSString (character-aware, not byte-count).
+        // Truncating std::string by bytes splits multi-byte UTF-8 sequences,
+        // making stringWithUTF8String: return nil → label invisible.
         std::string name = item.data.file_name.value_or(
             item.data.title.value_or(item.data.text_content.value_or("item")));
-        if (name.size() > 16) { name = name.substr(0, 14); name += "..."; }
-        NSString* nStr = [NSString stringWithUTF8String:name.c_str()];
+        NSString* nStr = [NSString stringWithUTF8String:name.c_str()] ?: @"???";
+        if (nStr.length > 16)
+            nStr = [[nStr substringToIndex:14] stringByAppendingString:@"…"];
         NSSize ns = [nStr sizeWithAttributes:labelAttrs];
         [nStr drawAtPoint:NSMakePoint(iconRect.origin.x + (kIconW - ns.width) / 2,
                                        iconRect.origin.y + kIconH + 2)

@@ -350,6 +350,11 @@ bool Application::init_mouse_shake() {
     shake_detector_ = std::make_unique<MouseShakeDetector>(shake_cfg);
 
     shake_detector_->set_callback([this]() {
+        // Shake is only meaningful when the shelf is hidden (user is dragging
+        // a file and wants to open the shelf). If the shelf is already visible
+        // the rapid movement is almost certainly the user dragging the shelf
+        // window itself — ignore it.
+        if (native_window_->isVisible()) return;
         log_message("INFO", "Shake — shelf shown");
         int w = std::max(100, settings_->shelf_position_width());
         int h = std::max(60, settings_->shelf_position_height());
