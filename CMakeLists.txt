@@ -13,6 +13,9 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 option(DROPANDDRAG_BUILD_TESTS "Build unit tests" ON)
 option(DROPANDDRAG_ENABLE_SANITIZERS "Enable sanitizers in debug" ON)
 option(DROPANDDRAG_ENABLE_LTO "Enable LTO in release" ON)
+option(DROPANDDRAG_ENABLE_PGO_GENERATE "Build with PGO instrumentation (step 1)" OFF)
+option(DROPANDDRAG_ENABLE_PGO_USE "Build with PGO profile data (step 2)" OFF)
+set(DROPANDDRAG_PGO_PROFILE "" CACHE PATH "Path to merged .profdata for PGO use")
 
 if(MSVC)
     add_compile_options(/std:c++latest /Zc:preprocessor /W4 /utf-8)
@@ -32,12 +35,54 @@ else()
         endif()
     else()
         add_compile_options(-O3 -DNDEBUG)
+
+        # Hide all symbols by default — enables better inlining across TUs and
+        # reduces the export table.  Safe for a monolithic executable.
+        add_compile_options(-fvisibility=hidden -fvisibility-inlines-hidden)
+
+        # Dead code elimination.  On macOS the linker flag is -dead_strip;
+        # -fdata/function-sections help the ELF linker (Linux) do the same.
+        add_compile_options(-fdata-sections -ffunction-sections)
+
+        # ThinLTO: parallel linking, virtually same runtime perf as full LTO,
+        # dramatically faster re-links (incremental ThinLTO caches .o IR).
         if(DROPANDDRAG_ENABLE_LTO)
-            add_compile_options(-flto)
-            add_link_options(-flto)
+            add_compile_options(-flto=thin)
+            add_link_options(-flto=thin)
         endif()
-        if(NOT APPLE OR NOT CMAKE_SYSTEM_PROCESSOR MATCHES "arm64")
+
+        # CPU targeting.  -march=native doesn't work on Apple arm64 with Apple
+        # Clang; -mcpu=native does — it enables AMX, NEON dot-product, and other
+        # M-series extensions that -march=armv8 misses. Skip on x86_64 cross.
+        if(APPLE AND NOT CMAKE_OSX_ARCHITECTURES MATCHES "x86_64")
+            add_compile_options(-mcpu=native)
+        elseif(NOT APPLE)
             add_compile_options(-march=native)
+        endif()
+
+        # macOS linker: strip unreachable code/data sections.
+        # Linux ld: --gc-sections does the same with -ffunction/data-sections above.
+        if(APPLE)
+            add_link_options(-Wl,-dead_strip)
+        elseif(UNIX)
+            add_link_options(-Wl,--gc-sections)
+        endif()
+
+        # ── PGO ────────────────────────────────────────────────────────────────
+        # Step 1: cmake -DDROPANDDRAG_ENABLE_PGO_GENERATE=ON
+        #         Run the app (shake, drop 50 files, drag, clear).
+        #         llvm-profdata merge -output=default.profdata default.profraw
+        # Step 2: cmake -DDROPANDDRAG_ENABLE_PGO_USE=ON
+        #                -DDROPANDDRAG_PGO_PROFILE=/path/to/default.profdata
+        if(DROPANDDRAG_ENABLE_PGO_GENERATE)
+            add_compile_options(-fprofile-instr-generate)
+            add_link_options(-fprofile-instr-generate)
+        elseif(DROPANDDRAG_ENABLE_PGO_USE)
+            if(NOT DROPANDDRAG_PGO_PROFILE)
+                message(FATAL_ERROR "DROPANDDRAG_PGO_PROFILE must point to merged .profdata")
+            endif()
+            add_compile_options(-fprofile-instr-use=${DROPANDDRAG_PGO_PROFILE})
+            add_link_options(-fprofile-instr-use=${DROPANDDRAG_PGO_PROFILE})
         endif()
     endif()
 endif()
