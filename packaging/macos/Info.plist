@@ -47,8 +47,6 @@
     <string>1.0.0</string>
     <key>LSMinimumSystemVersion</key>
     <string>12.0</string>
-    <key>LSUIElement</key>
-    <true/>
     <key>NSHighResolutionCapable</key>
     <true/>
     <key>NSSupportsSuddenTermination</key>

@@ -114,21 +114,16 @@ void SystemTrayImpl::setTooltip(std::string_view tooltip) {
     }
 }
 
-void SystemTrayImpl::setIcon(std::string_view iconPath) {
+void SystemTrayImpl::setIcon(std::string_view /*iconPath*/) {
     @autoreleasepool {
         if (!_statusItem) return;
 
-        NSString* path = [NSString stringWithUTF8String:iconPath.data()];
-        NSImage* icon = [[NSImage alloc] initWithContentsOfFile:path];
-
-        if (!icon && iconPath.data()) {
-            NSString* symbolName = [NSString stringWithUTF8String:iconPath.data()];
-            icon = [NSImage imageWithSystemSymbolName:symbolName
-                             accessibilityDescription:nil];
-        }
+        NSImage* icon = [NSImage imageNamed:NSImageNameTouchBarAddDetailTemplate];
+        if (!icon) icon = [NSImage imageWithSystemSymbolName:@"tray.full" accessibilityDescription:nil];
+        if (!icon) icon = [NSImage imageWithSystemSymbolName:@"square.and.arrow.down" accessibilityDescription:nil];
 
         if (icon) {
-            icon.size = NSMakeSize(18.0, 18.0);
+            [icon setSize:NSMakeSize(18, 18)];
             [icon setTemplate:YES];
             _statusItem.button.image = icon;
         }
