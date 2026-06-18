@@ -324,7 +324,7 @@ bool Application::init_core_systems() {
 }
 
 bool Application::init_threading() {
-    thread_pool_ = std::make_unique<ThreadPool>();
+    thread_pool_ = std::make_unique<ThreadPool>(0); // pool unused — no worker threads
     return true;
 }
 
@@ -361,6 +361,7 @@ bool Application::init_mouse_shake() {
         native_window_->positionNearCursor(w, h);
         native_window_->setAlwaysOnTop(true);
         native_window_->show(); // orderFrontRegardless triggers drawRect: automatically
+        set_shelf_visible(true);
     });
 
     if (!start_mouse_monitor(*shake_detector_)) {
@@ -469,8 +470,10 @@ void Application::create_tray() {
         } else if (action == "toggle") {
             if (native_window_->isVisible()) {
                 native_window_->hide();
+                set_shelf_visible(false);
             } else {
                 native_window_->show();
+                set_shelf_visible(true);
                 native_window_->setAlwaysOnTop(true);
             }
         }

@@ -14,6 +14,7 @@ namespace dd {
 namespace {
 
 std::atomic<bool> g_running{false};
+std::atomic<bool> g_shelf_visible{false};
 CFMachPortRef g_event_tap = nullptr;
 CFRunLoopSourceRef g_run_loop_source = nullptr;
 
@@ -23,6 +24,8 @@ CGEventRef event_callback(CGEventTapProxy /*proxy*/, CGEventType type,
     if (!detector || !g_running.load(std::memory_order_relaxed)) {
         return event;
     }
+
+    if (g_shelf_visible.load(std::memory_order_relaxed)) return event;
 
     switch (type) {
         case kCGEventMouseMoved:
@@ -112,6 +115,10 @@ void stop_mouse_monitor() {
 
 bool is_mouse_monitor_running() {
     return g_running.load(std::memory_order_acquire);
+}
+
+void set_shelf_visible(bool visible) {
+    g_shelf_visible.store(visible, std::memory_order_release);
 }
 
 } // namespace dd

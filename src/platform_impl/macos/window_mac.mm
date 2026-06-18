@@ -105,6 +105,9 @@ static const CGFloat kSideGripW       = 10.0; // px from each side edge
 // CGBitmapContext, coordinate transforms, or contentsScale bookkeeping needed.
 - (void)drawRect:(NSRect)dirtyRect {
     (void)dirtyRect;
+    // During window drag the content is unchanged — the compositor repositions the
+    // existing surface. Skip the Skia pass entirely to eliminate the CPU spike.
+    if (_windowDragActive) return;
     CGContextRef ctx = (CGContextRef)[[NSGraphicsContext currentContext] CGContext];
     CGContextClearRect(ctx, NSRectToCGRect(self.bounds));
     if (_ddDrawBlock) _ddDrawBlock(ctx, NSRectToCGRect(self.bounds));
@@ -153,39 +156,42 @@ static const CGFloat kSideGripW       = 10.0; // px from each side edge
 }
 - (void)mouseUp:(NSEvent*)e {
     NSPoint p = [self convertPoint:e.locationInWindow fromView:nil];
+    BOOL wasDragging = _windowDragActive;
     _windowDragActive = NO;
     // Finalize any in-progress rubber-band.
     if (_rubberBandActive) {
         _rubberBandActive = NO;
         _rubberBandRect   = NSZeroRect;
         [self setNeedsDisplay:YES];
+    } else if (wasDragging) {
+        // Flush any setNeedsDisplay:YES calls that were suppressed during the drag
+        // (e.g. a thumbnail finished loading mid-drag).
+        [self setNeedsDisplay:YES];
     }
     if (self.ddDelegate.onMouseUp)
         self.ddDelegate.onMouseUp((int)p.x, (int)p.y, (int)e.buttonNumber);
 }
 - (void)mouseMoved:(NSEvent*)e {
+    if (_windowDragActive) return;
     NSPoint p = [self convertPoint:e.locationInWindow fromView:nil];
     if (self.ddDelegate.onMouseMove)
         self.ddDelegate.onMouseMove((int)p.x, (int)p.y);
 }
 - (void)mouseDragged:(NSEvent*)e {
-    NSPoint p = [self convertPoint:e.locationInWindow fromView:nil];
-
-    // ── Manual window drag from grip zones ───────────────────────────────────
-    // _windowDragActive is set in mouseDown: when the press landed in a grip
-    // zone (not on any tile or button).  We track the delta from the original
-    // screen position ourselves so this works even after a programmatic
-    // setFrame: has reset AppKit's internal movableByWindowBackground state.
     if (_windowDragActive) {
         NSPoint cur = [NSEvent mouseLocation];
-        NSPoint newOrigin = NSMakePoint(
+        NSRect  frame = self.window.frame;
+        frame.origin  = NSMakePoint(
             _windowDragOrigin.x + cur.x - _windowDragScreenPt.x,
             _windowDragOrigin.y + cur.y - _windowDragScreenPt.y);
-        [self.window setFrameOrigin:newOrigin];
+        // display:NO — compositor repositions the existing window surface;
+        // no drawRect: call, no Skia work, no CPU spike.
+        [self.window setFrame:frame display:NO animate:NO];
         return;
     }
 
     // ── File drag-out from a tile ─────────────────────────────────────────────
+    NSPoint p = [self convertPoint:e.locationInWindow fromView:nil];
     if (!_dragInitiated && _mouseDownOnTile && _ddDragOutBlock) {
         if (hypot(p.x - _mouseDownPt.x, p.y - _mouseDownPt.y) > 5.0) {
             NSArray<NSDraggingItem*>* dragItems = _ddDragOutBlock(_mouseDownPt);
@@ -282,9 +288,10 @@ static const CGFloat kSideGripW       = 10.0; // px from each side edge
 }
 
 - (NSDragOperation)draggingUpdated:(id<NSDraggingInfo>)s {
-    NSPoint p = [self convertPoint:[s draggingLocation] fromView:nil];
-    if (self.ddDelegate.onDragOver)
+    if (self.ddDelegate.onDragOver) {
+        NSPoint p = [self convertPoint:[s draggingLocation] fromView:nil];
         self.ddDelegate.onDragOver((int)p.x, (int)p.y);
+    }
     return NSDragOperationCopy;
 }
 

@@ -188,8 +188,10 @@ static void drawColoredTile(NSRect r, const dd::Item& item) {
     }
     NSBezierPath* bg = [NSBezierPath bezierPathWithRoundedRect:r xRadius:8 yRadius:8];
     [col setFill]; [bg fill];
-    NSDictionary* a = @{ NSFontAttributeName: [NSFont boldSystemFontOfSize:18],
-                         NSForegroundColorAttributeName: [NSColor whiteColor] };
+    // Static — allocated once, not on every frame while thumbnails are loading.
+    static NSDictionary* a;
+    if (!a) a = @{ NSFontAttributeName:            [NSFont boldSystemFontOfSize:18],
+                   NSForegroundColorAttributeName: [NSColor whiteColor] };
     NSString* lbl = [NSString stringWithUTF8String:type];
     NSSize sz = [lbl sizeWithAttributes:a];
     [lbl drawAtPoint:NSMakePoint(NSMinX(r) + (48 - sz.width)  / 2,
