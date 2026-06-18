@@ -492,7 +492,14 @@ int Application::run_cocoa_loop() {
 
     while (running_.load(std::memory_order_acquire)) {
         native_loop_step();
-        if (renderer_) renderer_->render(16.67f);
+        // render() is NOT called here. Every redraw that matters is already
+        // triggered reactively via setNeedsDisplay:YES inside:
+        //   • Renderer::setItems()       — items added/cleared
+        //   • ddHandleClickBlock         — selection changes
+        //   • requestThumbnail callback  — thumbnail ready
+        //   • requestFavicon callback    — favicon ready
+        // Calling render() every 16 ms would run drawShelf() at 60 fps even
+        // when the shelf content hasn't changed, wasting CPU at idle.
     }
     log_message("INFO", "Exiting Cocoa run loop");
     return EXIT_SUCCESS;

@@ -27,6 +27,10 @@ static NSMutableDictionary<NSString*, NSImage*>* g_thumbCache;
 static NSMutableDictionary<NSString*, NSImage*>* g_faviconCache;
 static NSMutableSet<NSString*>*                  g_pendingThumbs;
 static NSMutableSet<NSString*>*                  g_pendingFavicons;
+// Limits simultaneous QLThumbnailGenerator requests. Without this, dropping
+// 50 images fires 50 concurrent async requests. Value 4 keeps throughput
+// high while avoiding system-level resource contention.
+static dispatch_semaphore_t g_thumbSemaphore;
 
 static void ensureCaches(void) {
     if (!g_iconCache)       g_iconCache      = [NSMutableDictionary dictionary];
@@ -34,6 +38,7 @@ static void ensureCaches(void) {
     if (!g_faviconCache)    g_faviconCache   = [NSMutableDictionary dictionary];
     if (!g_pendingThumbs)   g_pendingThumbs  = [NSMutableSet set];
     if (!g_pendingFavicons) g_pendingFavicons = [NSMutableSet set];
+    if (!g_thumbSemaphore)  g_thumbSemaphore = dispatch_semaphore_create(4);
 }
 
 // ─── systemIconForPath ───────────────────────────────────────────────────────
@@ -64,16 +69,23 @@ static void requestThumbnail(NSString* filePath, NSString* uuid) {
                              size:CGSizeMake(96, 96)
                             scale:2.0
                 representationTypes:QLThumbnailGenerationRequestRepresentationTypeThumbnail];
-        [[QLThumbnailGenerator sharedGenerator]
-            generateBestRepresentationForRequest:req
-            completionHandler:^(QLThumbnailRepresentation* rep, NSError* err) {
-                NSImage* img = (!err && rep) ? rep.NSImage : nil;
-                dispatch_async(dispatch_get_main_queue(), ^{
-                    if (img) { [img setSize:NSMakeSize(48, 48)]; g_thumbCache[uuid] = img; }
-                    else     [g_pendingThumbs removeObject:uuid];
-                    if (g_view) [g_view setNeedsDisplay:YES];
-                });
-            }];
+        // Dispatch to a background thread so the semaphore wait doesn't block
+        // the main thread. At most 4 QL requests run simultaneously; extras
+        // queue behind the semaphore and proceed as slots free up.
+        dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+            dispatch_semaphore_wait(g_thumbSemaphore, DISPATCH_TIME_FOREVER);
+            [[QLThumbnailGenerator sharedGenerator]
+                generateBestRepresentationForRequest:req
+                completionHandler:^(QLThumbnailRepresentation* rep, NSError* err) {
+                    dispatch_semaphore_signal(g_thumbSemaphore); // release slot
+                    NSImage* img = (!err && rep) ? rep.NSImage : nil;
+                    dispatch_async(dispatch_get_main_queue(), ^{
+                        if (img) { [img setSize:NSMakeSize(48, 48)]; g_thumbCache[uuid] = img; }
+                        else     [g_pendingThumbs removeObject:uuid];
+                        if (g_view) [g_view setNeedsDisplay:YES];
+                    });
+                }];
+        });
     } else {
         [g_pendingThumbs removeObject:uuid];
     }
