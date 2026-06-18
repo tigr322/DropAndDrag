@@ -1,7 +1,7 @@
 cask "dropanddrag" do
-  version "1.0.5"
-  sha256 arm:   "d5d98127be24855005e7c41967be05ba65d763ed8756b9d05d7b5ca37bfbb1b2",
-         intel: "d5d98127be24855005e7c41967be05ba65d763ed8756b9d05d7b5ca37bfbb1b2"
+  version "1.0.6"
+  sha256 arm:   "ffc9fd119c948959f114c7b12cb65c25f923fa8d6d3ddf7de43ee8488e464bbc",
+         intel: "ffc9fd119c948959f114c7b12cb65c25f923fa8d6d3ddf7de43ee8488e464bbc"
 
   url "https://github.com/tigr322/DropAndDrag/releases/download/v#{version}/DropAndDrag-#{version}-macOS.dmg"
   name "DropAndDrag"
@@ -22,9 +22,5 @@ cask "dropanddrag" do
     For shake-to-open: System Settings → Privacy & Security → Accessibility → enable DropAndDrag
   EOS
 
-  zap trash: [
-    "~/Library/Application Support/DropAndDrag",
-    "~/Library/Preferences/com.dropanddrag.app.plist",
-    "~/Library/Caches/DropAndDrag",
-  ]
+  zap trash: ["~/Library/Application Support/DropAndDrag", "~/Library/Preferences/com.dropanddrag.app.plist", "~/Library/Caches/DropAndDrag"]
 end
