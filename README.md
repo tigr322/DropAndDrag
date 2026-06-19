@@ -15,19 +15,19 @@
 
 ## Download
 
-**Homebrew:**
+**Homebrew(Recommended):**
 ```bash
+brew trust tigr322/tap
 brew tap tigr322/tap
 brew install --cask dropanddrag
 ```
 
-**Direct DMG:** [DropAndDrag-1.0.7-macOS.dmg](https://github.com/tigr322/DropAndDrag/releases/download/v1.0.7/DropAndDrag-1.0.7-macOS.dmg) 
-
-> **First launch:** macOS blocks unsigned apps.  
-> Go to **System Settings → Privacy & Security** → scroll down → **Open Anyway**.
-
-> **Shake-to-open:** requires Accessibility permission.  
-> **System Settings → Privacy & Security → Accessibility** → enable DropAndDrag.
+**Direct DMG:** [DropAndDrag-1.0.11-macOS.dmg](https://github.com/tigr322/DropAndDrag/releases/download/v1.0.11/DropAndDrag-1.0.11-macOS.dmg) 
+1. Open DMG, drag DropAndDrag.app to /Applications
+2. sudo xattr -dr com.apple.quarantine /Applications/DropAndDrag.app
+3. open /Applications/DropAndDrag.app
+   (if blocked: System Settings → Privacy & Security → Open Anyway)
+4. System Settings → Accessibility → enable DropAndDrag (for shake)
 
 ## Features
 
