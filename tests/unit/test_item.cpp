@@ -31,19 +31,16 @@ TEST_CASE("ItemData move semantics") {
 
 TEST_CASE("ItemMetadata default construction") {
     ItemMetadata m;
-    ASSERT_TRUE(m.uuid.empty());
     ASSERT_FALSE(m.is_favorite);
     ASSERT_TRUE(m.tags.empty());
 }
 
 TEST_CASE("ItemMetadata move semantics") {
     ItemMetadata m;
-    m.uuid = "test-uuid";
     m.is_favorite = true;
     m.tags = {"tag1", "tag2"};
 
     ItemMetadata moved = std::move(m);
-    ASSERT_EQ(moved.uuid, "test-uuid");
     ASSERT_TRUE(moved.is_favorite);
     ASSERT_EQ(moved.tags.size(), 2u);
 }
@@ -68,7 +65,6 @@ TEST_CASE("Item serialization round-trip") {
     item.data.url = "https://example.com";
     item.data.title = "Example";
     item.data.file_size = 1024;
-    item.metadata.uuid = "serial-test";
     item.metadata.is_favorite = true;
     item.metadata.tags = {"web", "example"};
 

@@ -21,7 +21,6 @@
 // are wired.  See ARCH_AUDIT.md §10.
 
 #include <any>
-#include <atomic>
 #include <cstdint>
 #include <functional>
 #include <mutex>
@@ -100,12 +99,11 @@ private:
     };
 
     mutable std::mutex mutex_;
-    // Map from event type to all active subscriptions for that type.
     std::unordered_map<EventType, std::vector<Subscription>> subscribers_;
-    // Monotonically increasing token counter.
-    std::atomic<SubscriptionToken> next_token_{1};
+    // Reverse map: token → EventType for O(1) unsubscribe.
+    std::unordered_map<SubscriptionToken, EventType> token_to_type_;
+    uint64_t next_token_{1};   // plain — always accessed under mutex_
 
-    // Test-injection override; null in production (uses static-local instance).
     static EventBus* s_override_;
 };
 

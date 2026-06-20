@@ -41,7 +41,7 @@ std::string ItemStore::add(Item item) {
 
 std::optional<Item> ItemStore::get(std::string_view uuid) const {
     std::shared_lock lock(mutex_);
-    auto it = items_.find(std::string(uuid));
+    auto it = items_.find(uuid);
     return it != items_.end() ? std::optional<Item>{it->second} : std::nullopt;
 }
 
@@ -58,7 +58,7 @@ std::vector<Item> ItemStore::getAll() const {
 bool ItemStore::update(std::string_view uuid, Item item) {
     {
         std::unique_lock lock(mutex_);
-        auto it = items_.find(std::string(uuid));
+        auto it = items_.find(uuid);
         if (it == items_.end()) return false;
         it->second = std::move(item);
     }
@@ -69,7 +69,9 @@ bool ItemStore::update(std::string_view uuid, Item item) {
 bool ItemStore::remove(std::string_view uuid) {
     {
         std::unique_lock lock(mutex_);
-        if (items_.erase(std::string(uuid)) == 0) return false;
+        auto it = items_.find(uuid);
+        if (it == items_.end()) return false;
+        items_.erase(it);
     }
     notify(StoreEvent::Removed, uuid);
     return true;

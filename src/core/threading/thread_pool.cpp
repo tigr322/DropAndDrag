@@ -40,10 +40,10 @@ void ThreadPool::shutdown() {
 }
 
 void ThreadPool::wait_all() {
-    // Spin-yield; acceptable because this is only called during graceful shutdown
-    // when no new tasks are expected.
-    while (pending_tasks() > 0) {
-        std::this_thread::yield();
+    size_t cur = pending_count_.load(std::memory_order_acquire);
+    while (cur > 0) {
+        pending_count_.wait(cur, std::memory_order_acquire);
+        cur = pending_count_.load(std::memory_order_acquire);
     }
 }
 
@@ -71,7 +71,7 @@ void ThreadPool::worker_loop(std::stop_token stoken, size_t /*index*/) {
         }
         // Lock released before running the task — other workers can dequeue in parallel.
         task();
-        --pending_count_;
+        if (--pending_count_ == 0) pending_count_.notify_all();
     }
 }
 

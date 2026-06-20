@@ -45,11 +45,13 @@ void Settings::load(std::string_view path) {
 }
 
 void Settings::save(std::string_view path) const {
-    std::shared_lock lock(mutex_);
-    nlohmann::json j = data_;
-
-    std::string path_str(path);
-    std::ofstream file(path_str);
+    SettingsData snapshot;
+    {
+        std::shared_lock lock(mutex_);
+        snapshot = data_;
+    }
+    nlohmann::json j = snapshot;
+    std::ofstream file{std::string(path)};
     file << j.dump(2);
 }
 

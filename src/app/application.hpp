@@ -7,15 +7,14 @@
 //   2. init_directories    — create ~/Library/Application Support/DropAndDrag
 //   3. init_logging        — open log file
 //   4. init_core_systems   — EventBus, Settings
-//   5. init_threading      — ThreadPool(0) — no workers; pool reserved for future use
-//   6. init_platform       — NativeWindow, WindowManager, init_native_app()
-//   7. init_mouse_shake    — MouseShakeDetector + CGEventTap (non-fatal if denied)
-//   8. init_ui             — Renderer, drop/clear/hide callbacks
-//   9. wire_event_bus      — (currently no-op; bus is ready but unused)
-//  10. create_tray         — SystemTray with quit/toggle actions
+//   5. init_platform       — NativeWindow, WindowManager, init_native_app()
+//   6. init_mouse_shake    — MouseShakeDetector + CGEventTap (non-fatal if denied)
+//   7. init_ui             — Renderer, drop/clear/hide callbacks
+//   8. wire_event_bus      — (currently no-op; bus is ready but unused)
+//   9. create_tray         — SystemTray with quit/toggle actions
 //
 // Shutdown (Application::shutdown / ~Application):
-//   stop_mouse_monitor → ThreadPool::shutdown
+//   stop_mouse_monitor → cleanup_signal_handlers
 //
 // Singleton pattern:
 //   Application::instance() returns the process-wide singleton.
@@ -32,7 +31,6 @@ namespace dd {
 class ItemStore;
 class Settings;
 class EventBus;
-class ThreadPool;
 class WindowManager;
 class NativeWindow;
 class MouseShakeDetector;
@@ -80,7 +78,6 @@ private:
     bool init_directories(const std::string& app_data_dir);
     bool init_logging(const std::string& app_data_dir);
     bool init_core_systems();
-    bool init_threading();
     bool init_platform();
     bool init_mouse_shake();
     bool init_ui();
@@ -104,7 +101,6 @@ private:
     std::unique_ptr<ItemStore>           item_store_;
     std::unique_ptr<Settings>            settings_;
     std::unique_ptr<EventBus>            event_bus_;
-    std::unique_ptr<ThreadPool>          thread_pool_;
 
     std::unique_ptr<NativeWindow>        native_window_;
     std::unique_ptr<WindowManager>       window_manager_;

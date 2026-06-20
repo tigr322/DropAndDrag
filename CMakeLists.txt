@@ -1,5 +1,7 @@
 cmake_minimum_required(VERSION 3.25)
-project(DropAndDrag VERSION 1.0.0 LANGUAGES CXX OBJCXX)
+project(DropAndDrag VERSION 1.0.12 LANGUAGES CXX OBJCXX)
+
+configure_file(src/version.hpp.in ${CMAKE_CURRENT_BINARY_DIR}/version.hpp @ONLY)
 
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -151,7 +153,7 @@ target_link_libraries(DropAndDragUI PUBLIC
 )
 
 add_executable(DropAndDrag ${MAIN_SOURCE} ${APP_SOURCES})
-target_include_directories(DropAndDrag PRIVATE src src/vendor)
+target_include_directories(DropAndDrag PRIVATE src src/vendor ${CMAKE_CURRENT_BINARY_DIR})
 target_link_libraries(DropAndDrag PRIVATE
     DropAndDragCore
     DropAndDragPlatform

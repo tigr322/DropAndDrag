@@ -50,7 +50,6 @@ inline void from_json(const nlohmann::json& j, ItemData& d) {
 
 inline void to_json(nlohmann::json& j, const ItemMetadata& m) {
     j = nlohmann::json::object();
-    j["uuid"]         = m.uuid;
     j["created_at"]   = tp_to_ms(m.created_at);
     j["modified_at"]  = tp_to_ms(m.modified_at);
     j["accessed_at"]  = tp_to_ms(m.accessed_at);
@@ -60,7 +59,6 @@ inline void to_json(nlohmann::json& j, const ItemMetadata& m) {
 }
 
 inline void from_json(const nlohmann::json& j, ItemMetadata& m) {
-    j.at("uuid").get_to(m.uuid);
     m.created_at  = ms_to_tp(j.at("created_at").get<int64_t>());
     m.modified_at = ms_to_tp(j.at("modified_at").get<int64_t>());
     m.accessed_at = ms_to_tp(j.at("accessed_at").get<int64_t>());

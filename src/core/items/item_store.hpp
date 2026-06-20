@@ -18,6 +18,18 @@
 
 namespace dd {
 
+// Transparent hasher so find/update/remove accept string_view without
+// allocating a temporary std::string.
+struct StringHash {
+    using is_transparent = void;
+    size_t operator()(std::string_view sv) const noexcept {
+        return std::hash<std::string_view>{}(sv);
+    }
+    size_t operator()(const std::string& s) const noexcept {
+        return std::hash<std::string>{}(s);
+    }
+};
+
 class ItemStore : public IItemStore {
 public:
     ItemStore() = default;
@@ -57,8 +69,8 @@ private:
     void notify(StoreEvent event, std::string_view uuid);
 
     // Items map — guarded by mutex_ (shared for reads, exclusive for writes).
-    mutable std::shared_mutex                      mutex_;
-    std::unordered_map<std::string, Item>          items_;
+    mutable std::shared_mutex                                              mutex_;
+    std::unordered_map<std::string, Item, StringHash, std::equal_to<>>    items_;
 
     // Observer registry — separate mutex so observer callbacks can add/remove
     // other observers without deadlocking on mutex_.

@@ -27,18 +27,21 @@ void EventBus::set_instance_for_test(EventBus* p) noexcept {
 
 SubscriptionToken EventBus::subscribe(EventType type, EventCallback callback) {
     std::lock_guard lock(mutex_);
-    SubscriptionToken token = next_token_.fetch_add(1, std::memory_order_relaxed);
+    SubscriptionToken token = next_token_++;
     subscribers_[type].push_back({token, std::move(callback)});
+    token_to_type_[token] = type;
     return token;
 }
 
 void EventBus::unsubscribe(SubscriptionToken token) {
     std::lock_guard lock(mutex_);
-    for (auto& [type, subs] : subscribers_) {
-        std::erase_if(subs, [token](const Subscription& s) {
-            return s.token == token;
-        });
-    }
+    auto map_it = token_to_type_.find(token);
+    if (map_it == token_to_type_.end()) return;
+    EventType type = map_it->second;
+    token_to_type_.erase(map_it);
+    auto& subs = subscribers_[type];
+    subs.erase(std::find_if(subs.begin(), subs.end(),
+        [token](const Subscription& s) { return s.token == token; }));
 }
 
 void EventBus::emit(Event event) {

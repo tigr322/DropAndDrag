@@ -1,0 +1,2 @@
+#pragma once
+#define DROPANDDRAG_VERSION "@PROJECT_VERSION@"

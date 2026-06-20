@@ -17,7 +17,6 @@
 #include <core/items/item_store.hpp>
 #include <core/mouse_shake/mouse_shake_detector.hpp>
 #include <core/settings/settings.hpp>
-#include <core/threading/thread_pool.hpp>
 #include <platform/clipboard/clipboard.hpp>
 #include <platform/drag_drop/drag_drop.hpp>
 #include <platform/fs_monitor/fs_monitor.hpp>
@@ -34,6 +33,8 @@
 // #include <ui/renderer.hpp>
 // #include <ui/themes/theme.hpp>
 
+#include <version.hpp>
+
 #include <chrono>
 #include <csignal>
 #include <cstdlib>
@@ -42,9 +43,10 @@
 #include <iomanip>
 #include <iostream>
 #include <mutex>
-#include <thread>
+#include <random>
 #include <sstream>
 #include <string_view>
+#include <thread>
 
 #if defined(__APPLE__)
 #include <mach-o/dyld.h>
@@ -70,18 +72,36 @@ bool g_log_to_console{true};
 // shared log_file and ensures lines don't interleave on the console.
 void log_message(std::string_view level, std::string_view message) {
     std::lock_guard lock(g_log_mutex);
-    auto now = std::chrono::system_clock::now();
+    auto now  = std::chrono::system_clock::now();
     auto time = std::chrono::system_clock::to_time_t(now);
     std::ostringstream oss;
     oss << "[" << std::put_time(std::localtime(&time), "%Y-%m-%d %H:%M:%S")
         << "] [" << level << "] " << message << "\n";
+    const bool important = (level == "WARN" || level == "ERROR");
     if (g_log_file.is_open()) {
         g_log_file << oss.str();
-        g_log_file.flush();
+        if (important) g_log_file.flush();
     }
     if (g_log_to_console) {
         std::cerr << oss.str();
     }
+}
+
+std::string make_uuid() {
+    static std::mt19937_64 rng{std::random_device{}()};
+    static std::uniform_int_distribution<uint64_t> dist;
+    uint64_t hi = dist(rng);
+    uint64_t lo = dist(rng);
+    hi = (hi & 0xFFFFFFFFFFFF0FFFULL) | 0x0000000000004000ULL; // version 4
+    lo = (lo & 0x3FFFFFFFFFFFFFFFULL) | 0x8000000000000000ULL; // variant 10xx
+    char buf[37];
+    std::snprintf(buf, sizeof(buf), "%08x-%04x-%04x-%04x-%012llx",
+        static_cast<uint32_t>(hi >> 32),
+        static_cast<uint16_t>(hi >> 16),
+        static_cast<uint16_t>(hi),
+        static_cast<uint16_t>(lo >> 48),
+        static_cast<unsigned long long>(lo & 0x0000FFFFFFFFFFFFULL));
+    return buf;
 }
 
 #if defined(__APPLE__)
@@ -184,17 +204,12 @@ bool Application::init(int argc, char* argv[]) {
 
     app_data_dir_ = std::move(app_data);
 
-    log_message("INFO", "DropAndDrag v1.0.0 starting");
+    log_message("INFO", "DropAndDrag " DROPANDDRAG_VERSION " starting");
 
     setup_signal_handlers();
 
     if (!init_core_systems()) {
         log_message("ERROR", "Failed to initialize core systems");
-        return false;
-    }
-
-    if (!init_threading()) {
-        log_message("ERROR", "Failed to initialize threading");
         return false;
     }
 
@@ -244,8 +259,6 @@ void Application::shutdown() {
     log_message("INFO", "Shutting down");
 
     stop_mouse_monitor();
-
-    thread_pool_->shutdown();
 
     cleanup_signal_handlers();
 
@@ -319,11 +332,6 @@ bool Application::init_core_systems() {
     return true;
 }
 
-bool Application::init_threading() {
-    thread_pool_ = std::make_unique<ThreadPool>(0); // pool unused — no worker threads
-    return true;
-}
-
 bool Application::init_platform() {
     native_window_ = NativeWindow::create(WindowStyle::Transparent);
     window_manager_ = std::make_unique<WindowManager>();
@@ -390,16 +398,17 @@ bool Application::init_ui() {
     // ── Drop callback ─────────────────────────────────────────────────────────
     native_window_->setDropCallback([this](std::vector<std::string> paths) {
         log_message("INFO", std::to_string(paths.size()) + " files dropped on shelf");
-        ItemList items = renderer_->items();
+        auto& store = ItemStore::instance();
         for (const auto& path : paths) {
             Item f;
-            f.data.uuid = std::to_string(items.size() + 1);
+            f.data.uuid = make_uuid();
             f.data.path = path;
             size_t slash = path.rfind('/');
             f.data.file_name = (slash != std::string::npos) ? path.substr(slash + 1) : path;
             f.data.type = ItemType::File;
-            items.push_back(std::move(f));
+            store.add(std::move(f));
         }
+        auto items = store.getAll();
         renderer_->setItems(items);
 
         // Resize window to fit a multi-row grid (max 5 columns).
@@ -423,6 +432,7 @@ bool Application::init_ui() {
     // ── Clear callback — reset window to default width ────────────────────────
     renderer_->setClearCallback([this]() {
         log_message("INFO", "Shelf cleared");
+        ItemStore::instance().clear();
         constexpr int kDefaultW = 400, kDefaultH = 120;
         auto b = native_window_->getBounds();
         int cx = b.x + b.width  / 2;
@@ -534,9 +544,7 @@ int Application::run_win32_loop() {
             TranslateMessage(&msg);
             DispatchMessage(&msg);
         }
-        if (thread_pool_ && thread_pool_->pending_tasks() == 0) {
-            MsgWaitForMultipleObjects(0, nullptr, FALSE, 16, QS_ALLINPUT);
-        }
+        MsgWaitForMultipleObjects(0, nullptr, FALSE, 16, QS_ALLINPUT);
     }
     log_message("INFO", "Exiting Win32 message loop");
     return EXIT_SUCCESS;

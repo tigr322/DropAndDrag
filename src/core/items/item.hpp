@@ -43,9 +43,8 @@ struct ItemData {
 };
 
 // Timestamps and organisational tags; kept separate from ItemData so the
-// DB layer can update metadata without re-serialising the full payload.
+// metadata can be updated independently without touching the content fields.
 struct ItemMetadata {
-    std::string uuid;   // matches ItemData::uuid — denormalised for convenience
     std::chrono::system_clock::time_point created_at {std::chrono::system_clock::now()};
     std::chrono::system_clock::time_point modified_at{std::chrono::system_clock::now()};
     std::chrono::system_clock::time_point accessed_at{std::chrono::system_clock::now()};
