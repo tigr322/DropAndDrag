@@ -1,7 +1,6 @@
 // application.cpp — Application lifecycle: init, run loop, shutdown.
 //
 // Startup order matters because of DI dependencies:
-//   Database must be open before ItemStore or SearchEngine are constructed.
 //   NativeWindow must exist before Renderer::init() receives the view handle.
 //   shake_detector_ must be constructed before start_mouse_monitor() is called.
 //
@@ -14,14 +13,10 @@
 
 #include "application.hpp"
 
-#include <core/collections/collection.hpp>
-#include <core/database/db.hpp>
 #include <core/event_bus/event_bus.hpp>
 #include <core/items/item_store.hpp>
 #include <core/mouse_shake/mouse_shake_detector.hpp>
-#include <core/search/search_engine.hpp>
 #include <core/settings/settings.hpp>
-#include <core/tags/tag.hpp>
 #include <core/threading/thread_pool.hpp>
 #include <platform/clipboard/clipboard.hpp>
 #include <platform/drag_drop/drag_drop.hpp>
@@ -188,16 +183,10 @@ bool Application::init(int argc, char* argv[]) {
     }
 
     app_data_dir_ = std::move(app_data);
-    db_path_ = app_data_dir_ + "/dropanddrag.db";
 
     log_message("INFO", "DropAndDrag v1.0.0 starting");
 
     setup_signal_handlers();
-
-    if (!init_database(app_data_dir_)) {
-        log_message("ERROR", "Failed to initialize database");
-        return false;
-    }
 
     if (!init_core_systems()) {
         log_message("ERROR", "Failed to initialize core systems");
@@ -257,8 +246,6 @@ void Application::shutdown() {
     stop_mouse_monitor();
 
     thread_pool_->shutdown();
-
-    database_->close();
 
     cleanup_signal_handlers();
 
@@ -322,16 +309,6 @@ bool Application::init_logging(const std::string& app_data_dir) {
     return g_log_file.is_open();
 }
 
-bool Application::init_database(const std::string& /*app_data_dir*/) {
-    database_ = std::make_unique<Database>();
-    // Database::init() is async (returns std::future<bool>) because it runs
-    // schema migrations on the DB thread.  Block here — everything that follows
-    // in startup requires a valid, migrated database.
-    auto result = database_->init(db_path_);
-    result.wait();
-    return result.get();
-}
-
 bool Application::init_core_systems() {
     event_bus_ = std::make_unique<EventBus>();
     settings_ = std::make_unique<Settings>();
@@ -339,7 +316,6 @@ bool Application::init_core_systems() {
     auto settings_path = app_data_dir_ + "/settings.json";
     settings_->load(settings_path);
 
-    search_engine_ = std::make_unique<SearchEngine>();
     return true;
 }
 

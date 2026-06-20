@@ -13,27 +13,6 @@ target_include_directories(test_item PRIVATE
 target_link_libraries(test_item PRIVATE DropAndDragCore Threads::Threads)
 add_test(NAME test_item COMMAND test_item)
 
-add_executable(test_db
-    unit/test_db.cpp
-    ${TEST_HEADER}
-)
-target_include_directories(test_db PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}
-    ${CMAKE_SOURCE_DIR}/src
-)
-target_link_libraries(test_db PRIVATE DropAndDragCore SQLite::SQLite3 Threads::Threads)
-add_test(NAME test_db COMMAND test_db)
-
-add_executable(test_search
-    unit/test_search.cpp
-    ${TEST_HEADER}
-)
-target_include_directories(test_search PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}
-    ${CMAKE_SOURCE_DIR}/src
-)
-target_link_libraries(test_search PRIVATE DropAndDragCore Threads::Threads)
-add_test(NAME test_search COMMAND test_search)
 
 add_executable(test_event_bus
     unit/test_event_bus.cpp

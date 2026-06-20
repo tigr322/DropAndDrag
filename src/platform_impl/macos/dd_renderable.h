@@ -5,6 +5,7 @@
 // trigger redraws without depending on DDDragView's concrete Objective-C type.
 // The block receives the CGContextRef already set up by AppKit (correct CTM,
 // Retina scale, and flipped coordinate system) and the view's logical bounds.
+NS_ASSUME_NONNULL_BEGIN
 @protocol DDRenderable <NSObject>
 // Called from drawRect: — draw the shelf into AppKit's already-set-up context.
 @property (nonatomic, copy, nullable) void (^ddDrawBlock)(CGContextRef ctx, CGRect bounds);
@@ -13,7 +14,7 @@
 // allocated; keeps window-drag and file-drag-out mutually exclusive.
 @property (nonatomic, copy, nullable) BOOL (^ddHitTestBlock)(NSPoint pt);
 // Full drag-out builder — only called when a real drag gesture fires on a tile.
-@property (nonatomic, copy, nullable) NSArray<NSDraggingItem*>* (^ddDragOutBlock)(NSPoint pt);
+@property (nonatomic, copy, nullable) NSArray<NSDraggingItem*>* _Nullable (^ddDragOutBlock)(NSPoint pt);
 // Special click regions (clear button, etc.). Return YES to consume the click
 // and prevent normal mouseDown: processing.
 @property (nonatomic, copy, nullable) BOOL (^ddHandleClickBlock)(NSPoint pt);
@@ -24,3 +25,4 @@
 // Positive deltaY = user scrolls up (natural scrolling: see content above).
 @property (nonatomic, copy, nullable) void (^ddScrollBlock)(CGFloat deltaY);
 @end
+NS_ASSUME_NONNULL_END

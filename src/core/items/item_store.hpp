@@ -10,10 +10,6 @@
 //   Application owns the concrete instance and registers it at startup via
 //   set_instance_for_test().  Unit tests can substitute a mock the same way.
 //   See iitem_store.hpp for the test-injection pattern.
-//
-// NOTE: Currently the store is purely in-memory — items are NOT persisted to
-// the Database on mutation.  Wiring store observers → Database::insertItem()
-// is listed as a pending task in ARCH_AUDIT.md.
 
 #include "iitem_store.hpp"
 

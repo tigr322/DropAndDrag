@@ -6,17 +6,16 @@
 //   1. parse_args          — --hidden, --config flags
 //   2. init_directories    — create ~/Library/Application Support/DropAndDrag
 //   3. init_logging        — open log file
-//   4. init_database       — open SQLite DB, run migrations, wait for result
-//   5. init_core_systems   — EventBus, Settings, SearchEngine
-//   6. init_threading      — ThreadPool(0) — no workers; pool reserved for future use
-//   7. init_platform       — NativeWindow, WindowManager, init_native_app()
-//   8. init_mouse_shake    — MouseShakeDetector + CGEventTap (non-fatal if denied)
-//   9. init_ui             — Renderer, drop/clear/hide callbacks
-//  10. wire_event_bus      — (currently no-op; bus is ready but unused)
-//  11. create_tray         — SystemTray with quit/toggle actions
+//   4. init_core_systems   — EventBus, Settings
+//   5. init_threading      — ThreadPool(0) — no workers; pool reserved for future use
+//   6. init_platform       — NativeWindow, WindowManager, init_native_app()
+//   7. init_mouse_shake    — MouseShakeDetector + CGEventTap (non-fatal if denied)
+//   8. init_ui             — Renderer, drop/clear/hide callbacks
+//   9. wire_event_bus      — (currently no-op; bus is ready but unused)
+//  10. create_tray         — SystemTray with quit/toggle actions
 //
 // Shutdown (Application::shutdown / ~Application):
-//   stop_mouse_monitor → ThreadPool::shutdown → Database::close
+//   stop_mouse_monitor → ThreadPool::shutdown
 //
 // Singleton pattern:
 //   Application::instance() returns the process-wide singleton.
@@ -31,15 +30,11 @@ namespace dd {
 
 // Forward declarations — keep this header fast to include.
 class ItemStore;
-class CollectionStore;
-class TagStore;
 class Settings;
 class EventBus;
-class SearchEngine;
 class ThreadPool;
 class WindowManager;
 class NativeWindow;
-class Database;
 class MouseShakeDetector;
 class Renderer;
 
@@ -84,7 +79,6 @@ private:
     std::string resolve_app_data_dir() const;
     bool init_directories(const std::string& app_data_dir);
     bool init_logging(const std::string& app_data_dir);
-    bool init_database(const std::string& app_data_dir);
     bool init_core_systems();
     bool init_threading();
     bool init_platform();
@@ -101,18 +95,15 @@ private:
     // --- Filesystem / logging paths ---
     std::string app_data_dir_;
     std::string log_path_;
-    std::string db_path_;
 
     // --- Command-line flags ---
     bool        start_hidden_{false};   // --hidden: don't show shelf on launch
     std::string config_path_;           // --config PATH: override data directory
 
     // --- Owned subsystems (construction order = dependency order) ---
-    std::unique_ptr<Database>            database_;
     std::unique_ptr<ItemStore>           item_store_;
     std::unique_ptr<Settings>            settings_;
     std::unique_ptr<EventBus>            event_bus_;
-    std::unique_ptr<SearchEngine>        search_engine_;
     std::unique_ptr<ThreadPool>          thread_pool_;
 
     std::unique_ptr<NativeWindow>        native_window_;

@@ -87,8 +87,8 @@ else()
     endif()
 endif()
 
-find_package(SQLite3 REQUIRED)
 find_package(Skia REQUIRED)
+find_package(ZLIB REQUIRED)
 find_package(Threads REQUIRED)
 
 if(UNIX AND NOT APPLE)
@@ -127,7 +127,6 @@ set(MAIN_SOURCE src/main.cpp)
 add_library(DropAndDragCore STATIC ${CORE_SOURCES})
 target_include_directories(DropAndDragCore PUBLIC src src/vendor)
 target_link_libraries(DropAndDragCore PUBLIC
-    SQLite::SQLite3
     Threads::Threads
 )
 
@@ -157,8 +156,8 @@ target_link_libraries(DropAndDrag PRIVATE
     DropAndDragCore
     DropAndDragPlatform
     DropAndDragUI
-    SQLite::SQLite3
     Skia::Skia
+    ZLIB::ZLIB
     Threads::Threads
 )
 

@@ -612,7 +612,7 @@ public:
 
     void positionNearCursor(int w, int h) override {
         NSPoint cursor = [NSEvent mouseLocation];
-        NSScreen* screen = [NSScreen mainScreen] ?: [[NSScreen screens] firstObject];
+        NSScreen* screen = [NSScreen mainScreen] ? [NSScreen mainScreen] : [[NSScreen screens] firstObject];
         NSRect sf = screen ? screen.visibleFrame : NSMakeRect(0, 0, 1440, 900);
         // Center shelf on cursor X; place just above cursor.
         int x = static_cast<int>(cursor.x) - w / 2;

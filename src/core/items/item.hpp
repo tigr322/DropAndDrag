@@ -15,7 +15,6 @@
 namespace dd {
 
 // Discriminator for the kind of content an item holds.
-// Stored as uint8_t in the DB; do not reorder existing values.
 enum class ItemType : uint8_t { File, Folder, Image, Text, URL, Unknown };
 
 // All mutable content fields for an item.

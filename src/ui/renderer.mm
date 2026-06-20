@@ -437,7 +437,8 @@ static void drawShelf(CGContextRef ctx, CGRect bounds, const dd::ItemList& items
         if (lit == g_labelCache.end()) {
             std::string name = item.data.file_name.value_or(
                 item.data.title.value_or(item.data.text_content.value_or("item")));
-            NSString* nStr = [NSString stringWithUTF8String:name.c_str()] ?: @"???";
+            NSString* nStr_ = [NSString stringWithUTF8String:name.c_str()];
+            NSString* nStr = nStr_ ? nStr_ : @"???";
             if (nStr.length > 16)
                 nStr = [[nStr substringToIndex:14] stringByAppendingString:@"…"];
             CGFloat w = [nStr sizeWithAttributes:labelAttrs].width;
