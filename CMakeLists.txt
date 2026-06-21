@@ -134,10 +134,16 @@ else()
         message(FATAL_ERROR "XInput2 not found — install with: sudo apt install libxi-dev")
     endif()
 endif()
-file(GLOB_RECURSE UI_SOURCES CONFIGURE_DEPENDS
-    src/ui/*.cpp
-    src/ui/*.mm
-)
+if(APPLE)
+    file(GLOB_RECURSE UI_SOURCES CONFIGURE_DEPENDS
+        src/ui/*.cpp
+        src/ui/*.mm
+    )
+else()
+    file(GLOB_RECURSE UI_SOURCES CONFIGURE_DEPENDS
+        src/ui/*.cpp
+    )
+endif()
 file(GLOB_RECURSE APP_SOURCES CONFIGURE_DEPENDS
     src/app/*.cpp
 )

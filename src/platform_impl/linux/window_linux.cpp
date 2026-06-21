@@ -527,6 +527,8 @@ public:
     Atom XdndActionLink;
 
 private:
+    friend class DDLinuxWindow;
+
     XDndHandler() {
         Display* dpy = acquireDisplay();
         auto& ac = AtomCache::instance();
