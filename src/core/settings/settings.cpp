@@ -10,6 +10,9 @@
 #include "settings.hpp"
 
 #include <fstream>
+#include <mutex>
+#include <optional>
+#include <shared_mutex>
 
 namespace dd {
 

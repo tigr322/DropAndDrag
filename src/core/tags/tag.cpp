@@ -2,6 +2,8 @@
 
 #include "tag.hpp"
 
+#include <mutex>
+#include <optional>
 #include <shared_mutex>
 #include <string_view>
 #include <unordered_map>
