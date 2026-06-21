@@ -71,26 +71,18 @@ void poll_loop() {
 
                 switch (event.xcookie.evtype) {
                     case XI_RawMotion: {
-                        auto* me = reinterpret_cast<XIRawEvent*>(event.xcookie.data);
-                        int x = 0, y = 0;
-                        double* vals = me->raw_values;
-                        for (int i = 0; i < me->valuators.mask_len * 8; ++i) {
-                            if (XIMaskIsSet(me->valuators.mask, i)) {
-                                if (i == 0) x = static_cast<int>(*vals);
-                                if (i == 1) y = static_cast<int>(*vals);
-                                vals++;
-                            }
-                        }
-                        g_detector->on_mouse_move(x, y);
-
-                        Window root, child;
+                        // XI_RawMotion gives relative deltas; we need absolute
+                        // screen coordinates for the shake algorithm, so query
+                        // the pointer position directly.
+                        Window root_ret, child_ret;
                         int rx, ry, wx, wy;
-                        unsigned int mask;
-                        if (XQueryPointer(g_display, g_root, &root, &child,
-                                         &rx, &ry, &wx, &wy, &mask)) {
-                            bool btn = (mask & (Button1Mask | Button2Mask |
-                                                Button3Mask | Button4Mask |
-                                                Button5Mask)) != 0;
+                        unsigned int state;
+                        if (XQueryPointer(g_display, g_root, &root_ret, &child_ret,
+                                         &rx, &ry, &wx, &wy, &state)) {
+                            g_detector->on_mouse_move(rx, ry);
+                            bool btn = (state & (Button1Mask | Button2Mask |
+                                                 Button3Mask | Button4Mask |
+                                                 Button5Mask)) != 0;
                             g_detector->set_mouse_button_down(btn);
                         }
                         break;
