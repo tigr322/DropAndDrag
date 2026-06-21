@@ -53,6 +53,10 @@ std::vector<DropItemData> DragDropManager::onDrop() {
     return {};
 }
 
+bool DragDropManager::isDragActive() const {
+    return false;
+}
+
 DragOperation DragDropManager::defaultOperation() {
     return DragOperation::Copy;
 }

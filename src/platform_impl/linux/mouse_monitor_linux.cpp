@@ -153,4 +153,12 @@ bool is_mouse_monitor_running() {
     return g_running.load(std::memory_order_acquire);
 }
 
+void set_shelf_visible(bool visible) {
+    // When the shelf becomes hidden, reset button-down state so a subsequent
+    // shake while dragging is detected cleanly.
+    if (!visible && g_detector) {
+        g_detector->set_mouse_button_down(false);
+    }
+}
+
 } // namespace dd

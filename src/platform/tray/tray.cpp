@@ -34,4 +34,10 @@ void SystemTray::setTooltip(std::string_view /*tooltip*/) {
 void SystemTray::setIcon(std::string_view /*icon_path*/) {
 }
 
+void SystemTray::update_tooltip(std::string_view /*tooltip*/) {
+}
+
+void SystemTray::update_icon(std::string_view /*icon_path*/) {
+}
+
 } // namespace dd

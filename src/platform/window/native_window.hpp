@@ -104,6 +104,9 @@ public:
     // Default is a no-op so non-macOS platforms compile without changes.
     virtual void positionNearCursor(int w, int h) { (void)w; (void)h; }
 
+    // Pump pending platform events. Called each tick on Linux; no-op elsewhere.
+    virtual void processEvents() {}
+
     // Platform factory — links against the appropriate platform_impl/ module.
     static std::unique_ptr<NativeWindow> create(WindowStyle style);
 };

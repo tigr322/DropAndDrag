@@ -555,7 +555,8 @@ int Application::run_win32_loop() {
 int Application::run_linux_loop() {
     log_message("INFO", "Entering Linux event loop");
     while (running_.load(std::memory_order_acquire)) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(16));
+        if (native_window_) native_window_->processEvents();
+        std::this_thread::sleep_for(std::chrono::milliseconds(4));
     }
     log_message("INFO", "Exiting Linux event loop");
     return EXIT_SUCCESS;

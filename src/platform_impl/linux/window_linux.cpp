@@ -1,12 +1,15 @@
 // window_linux.cpp — Linux NativeWindow stub (X11 implementation pending).
 
 #include "platform/window/native_window.hpp"
+#include "platform/drag_drop/drag_drop.hpp"
 
 #include <X11/Xlib.h>
 #include <X11/Xatom.h>
 #include <X11/Xutil.h>
 #include <X11/cursorfont.h>
 #include <X11/keysym.h>
+
+#include <platform/hotkeys/hotkeys.hpp>
 
 #include <algorithm>
 #include <atomic>
@@ -186,6 +189,12 @@ public:
 
         setWindowType();
 
+        // Announce XDnD protocol version 5 support so drag sources send us XdndEnter.
+        Atom xdnd_aware = ac.get(display_, "XdndAware");
+        long xdnd_version = 5;
+        XChangeProperty(display_, window_, xdnd_aware, XA_ATOM, 32, PropModeReplace,
+                        reinterpret_cast<unsigned char*>(&xdnd_version), 1);
+
         XSizeHints* hints = XAllocSizeHints();
         if (hints) {
             hints->flags = PMinSize;
@@ -326,7 +335,29 @@ public:
     ::Window x11Window() const { return window_; }
     Display* display() const { return display_; }
 
-    void processEvents() {
+    [[nodiscard]] void* nativeHandle() const override {
+        return reinterpret_cast<void*>(static_cast<uintptr_t>(window_));
+    }
+
+    void positionNearCursor(int w, int h) override {
+        ::Window root_ret, child_ret;
+        int root_x, root_y, win_x, win_y;
+        unsigned int mask_ret;
+        if (XQueryPointer(display_, root_, &root_ret, &child_ret,
+                          &root_x, &root_y, &win_x, &win_y, &mask_ret)) {
+            int x = root_x - w / 2;
+            int y = root_y - h / 2;
+            int screen_w = DisplayWidth(display_, screen_);
+            int screen_h = DisplayHeight(display_, screen_);
+            if (x + w > screen_w) x = screen_w - w;
+            if (y + h > screen_h) y = screen_h - h;
+            if (x < 0) x = 0;
+            if (y < 0) y = 0;
+            setBounds(x, y, w, h);
+        }
+    }
+
+    void processEvents() override {
         while (XPending(display_)) {
             XEvent ev;
             XNextEvent(display_, &ev);
@@ -394,6 +425,10 @@ private:
             break;
         }
 
+        case SelectionNotify:
+            handleSelectionNotify(ev);
+            break;
+
         case ClientMessage: {
             auto& ac = AtomCache::instance();
             Atom wm_protos = ac.get(display_, "WM_PROTOCOLS");
@@ -414,6 +449,7 @@ private:
     }
 
     void handleDragDropEvent(const XEvent& ev);
+    void handleSelectionNotify(const XEvent& ev);
 
     Display* display_;
     int screen_;
@@ -684,8 +720,6 @@ void DDLinuxWindow::handleDragDropEvent(const XEvent& ev) {
         msg_type == handler.XdndDrop ||
         msg_type == handler.XdndLeave) {
         handler.handleClientMessage(this, ev.xclient);
-    } else if (ev.type == SelectionNotify) {
-        handleSelectionNotify(ev);
     }
 }
 
@@ -767,7 +801,5 @@ void DDLinuxWindow::handleSelectionNotify(const XEvent& ev) {
         handler.finishXdnd(dpy, window_);
     }
 }
-
-void DDLinuxWindow::handleSelectionNotify(const XEvent& ev);
 
 } // namespace dd

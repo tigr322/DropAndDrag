@@ -33,9 +33,9 @@ void Notifications::show(std::string_view title, std::string_view message) {
     send_dbus_notification(title, message);
 }
 
-void Notifications::show_with_action(std::string_view title, std::string_view message,
-                                      std::string_view action_label,
-                                      std::function<void()> callback) {
+void Notifications::showWithAction(std::string_view title, std::string_view message,
+                                   std::string_view action_label,
+                                   NotificationActionCallback callback) {
     send_dbus_notification(title, message);
 
     if (callback) {

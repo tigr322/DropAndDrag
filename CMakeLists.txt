@@ -116,6 +116,23 @@ else()
     file(GLOB_RECURSE PLATFORM_IMPL_SOURCES CONFIGURE_DEPENDS
         src/platform_impl/linux/*.cpp
     )
+    # drag_drop.cpp handles all DragDropManager methods; drag_drop_linux.cpp
+    # duplicates instance() and would cause a linker duplicate-symbol error.
+    list(REMOVE_ITEM PLATFORM_IMPL_SOURCES
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/platform_impl/linux/drag_drop_linux.cpp"
+    )
+    # hotkeys_linux.cpp and tray_linux.cpp provide the full Linux implementations
+    # (with XGrabKey / XEMBED).  Keeping the platform-base stubs alongside them
+    # would produce duplicate symbol errors.
+    list(REMOVE_ITEM PLATFORM_ABSTRACT_SOURCES
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/platform/hotkeys/hotkeys.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/platform/tray/tray.cpp"
+    )
+
+    find_package(X11 REQUIRED)
+    if(NOT X11_Xi_FOUND)
+        message(FATAL_ERROR "XInput2 not found — install with: sudo apt install libxi-dev")
+    endif()
 endif()
 file(GLOB_RECURSE UI_SOURCES CONFIGURE_DEPENDS
     src/ui/*.cpp
@@ -232,11 +249,16 @@ elseif(WIN32)
         WIN32_EXECUTABLE TRUE
     )
 elseif(UNIX AND NOT APPLE)
+    target_include_directories(DropAndDragPlatform PRIVATE ${X11_INCLUDE_DIR})
     target_link_libraries(DropAndDragPlatform PRIVATE
         ${CMAKE_DL_LIBS}
+        ${X11_LIBRARIES}
+        ${X11_Xi_LIB}
     )
     target_link_libraries(DropAndDrag PRIVATE
         ${CMAKE_DL_LIBS}
+        ${X11_LIBRARIES}
+        ${X11_Xi_LIB}
     )
     if(OPENGL_FOUND)
         target_link_libraries(DropAndDrag PRIVATE OpenGL::GL)

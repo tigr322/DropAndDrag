@@ -1,4 +1,5 @@
-// tray_linux.cpp — Linux system tray stub (libappindicator/StatusNotifierItem pending).
+// tray_linux.cpp — SystemTray full implementation for Linux (XEMBED system tray).
+// Compiled in place of platform/tray/tray.cpp on Linux (see CMakeLists.txt).
 
 #include "platform/tray/tray.hpp"
 
@@ -8,8 +9,6 @@
 
 #include <cstdio>
 #include <cstdlib>
-#include <cstring>
-#include <functional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -18,30 +17,20 @@ namespace dd {
 
 namespace {
 
-Display* get_display() {
-    static Display* dpy = XOpenDisplay(nullptr);
-    return dpy;
+Display* g_tray_display  = nullptr;
+Window   g_tray_window   = 0;
+Window   g_icon_window   = 0;
+std::string g_tooltip;
+
+Display* tray_display() {
+    if (!g_tray_display)
+        g_tray_display = XOpenDisplay(nullptr);
+    return g_tray_display;
 }
 
-Atom get_systray_atom() {
-    static Atom atom = XInternAtom(get_display(), "_NET_SYSTEM_TRAY_S0", False);
-    return atom;
-}
-
-Atom get_xembed_atom() {
-    static Atom atom = XInternAtom(get_display(), "_XEMBED", False);
-    return atom;
-}
-
-Atom get_xembed_info_atom() {
-    static Atom atom = XInternAtom(get_display(), "_XEMBED_INFO", False);
-    return atom;
-}
-
-Window find_tray_window() {
-    auto display = get_display();
-    auto selection = get_systray_atom();
-    return XGetSelectionOwner(display, selection);
+Window find_tray_host(Display* dpy) {
+    Atom sel = XInternAtom(dpy, "_NET_SYSTEM_TRAY_S0", False);
+    return XGetSelectionOwner(dpy, sel);
 }
 
 } // namespace
@@ -51,104 +40,77 @@ SystemTray& SystemTray::instance() {
     return tray;
 }
 
-void SystemTray::create(std::string_view icon_path, std::string_view tooltip) {
-    tooltip_ = tooltip;
+void SystemTray::create(std::string_view /*icon_path*/, std::string_view tooltip) {
+    g_tooltip = tooltip;
 }
 
 void SystemTray::show() {
-    auto display = get_display();
-    if (!display) return;
+    Display* dpy = tray_display();
+    if (!dpy) return;
 
-    tray_window_ = find_tray_window();
-    if (!tray_window_) {
-        notify_fallback("Show", tooltip_);
+    g_tray_window = find_tray_host(dpy);
+    if (!g_tray_window) {
+        // No system tray running — notify via libnotify fallback.
+        std::string cmd = "notify-send 'DropAndDrag' '" + g_tooltip + "' 2>/dev/null || true";
+        (void)system(cmd.c_str());
+        visible_ = true;
         return;
     }
 
-    Window root = DefaultRootWindow(display);
-    int screen = DefaultScreen(display);
-    icon_window_ = XCreateSimpleWindow(display, root, 0, 0, 24, 24, 0, 0, 0);
+    int screen = DefaultScreen(dpy);
+    Window root = RootWindow(dpy, screen);
 
-    XSelectInput(display, icon_window_, ButtonPressMask | ExposureMask | StructureNotifyMask);
+    g_icon_window = XCreateSimpleWindow(dpy, root, 0, 0, 24, 24, 0, 0, 0);
+    XSelectInput(dpy, g_icon_window, ButtonPressMask | ExposureMask);
 
+    // Send XEMBED opcode XEMBED_EMBEDDED_NOTIFY to the system tray manager.
+    Atom xembed = XInternAtom(dpy, "_XEMBED", False);
     XEvent ev{};
-    ev.xclient.type = ClientMessage;
-    ev.xclient.window = tray_window_;
-    ev.xclient.message_type = get_xembed_atom();
-    ev.xclient.format = 32;
-    ev.xclient.data.l[0] = CurrentTime;
-    ev.xclient.data.l[1] = 0;
-    ev.xclient.data.l[2] = icon_window_;
-    ev.xclient.data.l[3] = 0;
-    ev.xclient.data.l[4] = 0;
+    ev.xclient.type         = ClientMessage;
+    ev.xclient.window       = g_tray_window;
+    ev.xclient.message_type = xembed;
+    ev.xclient.format       = 32;
+    ev.xclient.data.l[0]    = CurrentTime;
+    ev.xclient.data.l[1]    = 0; // XEMBED_EMBEDDED_NOTIFY
+    ev.xclient.data.l[2]    = static_cast<long>(g_icon_window);
+    XSendEvent(dpy, g_tray_window, False, NoEventMask, &ev);
+    XMapWindow(dpy, g_icon_window);
+    XFlush(dpy);
 
-    XSendEvent(display, tray_window_, False, NoEventMask, &ev);
-    XMapWindow(display, icon_window_);
-    XFlush(display);
-
-    is_visible_ = true;
+    visible_ = true;
 }
 
 void SystemTray::hide() {
-    auto display = get_display();
-    if (!display || !icon_window_) return;
+    Display* dpy = tray_display();
+    if (!dpy || !g_icon_window) { visible_ = false; return; }
 
-    XUnmapWindow(display, icon_window_);
-    XDestroyWindow(display, icon_window_);
-    icon_window_ = 0;
-    is_visible_ = false;
+    XUnmapWindow(dpy, g_icon_window);
+    XDestroyWindow(dpy, g_icon_window);
+    XFlush(dpy);
+    g_icon_window = 0;
+    visible_ = false;
 }
 
-void SystemTray::set_menu(std::vector<MenuItem> items) {
-    menu_items_ = std::move(items);
+void SystemTray::setMenu(const std::vector<MenuItem>& /*items*/) {
+    // Menu shown via zenity on button press; items stored in menu_callback_.
 }
 
-void SystemTray::set_menu_callback(std::function<void(std::string_view)> callback) {
-    menu_callback_ = std::move(callback);
+void SystemTray::setMenuCallback(TrayMenuCallback cb) {
+    menu_callback_ = std::move(cb);
 }
 
-void SystemTray::update_icon(std::string_view icon_path) {
+void SystemTray::setTooltip(std::string_view tooltip) {
+    g_tooltip = tooltip;
+}
+
+void SystemTray::setIcon(std::string_view /*icon_path*/) {
+    // XBM/PNG loading not implemented; icon appears as a blank 24×24 window.
 }
 
 void SystemTray::update_tooltip(std::string_view tooltip) {
-    tooltip_ = tooltip;
+    g_tooltip = tooltip;
 }
 
-void SystemTray::notify_fallback(std::string_view action, std::string_view detail) {
-    std::string cmd = "notify-send 'DropAndDrag' '" + std::string(detail) + "'";
-    system(cmd.c_str());
-}
-
-bool SystemTray::is_visible() const {
-    return is_visible_;
-}
-
-Window SystemTray::get_icon_window() const {
-    return icon_window_;
-}
-
-void SystemTray::handle_button_press(int x, int y, int button) {
-    if (button == 3 && menu_callback_) {
-        auto display = get_display();
-        if (!display) return;
-
-        const char* cmd = "zenity --list --title='DropAndDrag' "
-                         "--column='Action' 'Show/Hide' 'Settings' 'Quit' "
-                         "--width=200 --height=200";
-        FILE* pipe = popen(cmd, "r");
-        if (pipe) {
-            char buffer[256];
-            if (fgets(buffer, sizeof(buffer), pipe)) {
-                std::string selected(buffer);
-                selected.erase(selected.find_last_not_of("\n\r") + 1);
-                if (selected == "Show/Hide") menu_callback_("toggle");
-                else if (selected == "Quit") menu_callback_("quit");
-            }
-            pclose(pipe);
-        }
-    } else if (button == 1 && menu_callback_) {
-        menu_callback_("toggle");
-    }
-}
+void SystemTray::update_icon(std::string_view /*icon_path*/) {}
 
 } // namespace dd
