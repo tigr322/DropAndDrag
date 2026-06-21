@@ -8,6 +8,7 @@
 #include <X11/Xatom.h>
 
 #include <atomic>
+#include <cstdio>
 #include <cstring>
 #include <thread>
 
@@ -68,13 +69,16 @@ void poll_loop() {
                 XGetEventData(g_display, &event.xcookie);
 
                 if (event.xcookie.evtype == XI_RawMotion) {
-                        // XI_RawMotion gives relative deltas; query absolute
-                        // position via XQueryPointer for the shake algorithm.
+                        static int s_ev_count = 0;
+                        ++s_ev_count;
                         Window root_ret, child_ret;
                         int rx, ry, wx, wy;
                         unsigned int state;
                         if (XQueryPointer(g_display, g_root, &root_ret, &child_ret,
                                          &rx, &ry, &wx, &wy, &state)) {
+                            if (s_ev_count <= 5 || s_ev_count % 200 == 0)
+                                fprintf(stderr, "[shake] ev#%d pos=%d,%d\n",
+                                        s_ev_count, rx, ry);
                             g_detector->on_mouse_move(rx, ry);
                         }
                     }

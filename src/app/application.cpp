@@ -353,11 +353,18 @@ bool Application::init_mouse_shake() {
 
     shake_detector_ = std::make_unique<MouseShakeDetector>(shake_cfg);
 
+#if defined(__linux__)
+    // Looser thresholds for Linux: fewer reversals, wider time window,
+    // smaller dead zone — compensates for XI2 event rate differences.
+    shake_cfg.direction_changes = 3;
+    shake_cfg.dead_zone_px      = 4;
+    shake_cfg.time_window       = std::chrono::milliseconds(800);
+    shake_detector_->set_config(shake_cfg);
+#endif
+
     shake_detector_->set_callback([this]() {
-        // Shake is only meaningful when the shelf is hidden (user is dragging
-        // a file and wants to open the shelf). If the shelf is already visible
-        // the rapid movement is almost certainly the user dragging the shelf
-        // window itself — ignore it.
+        fprintf(stderr, "[shake] callback fired! visible=%d\n",
+                native_window_ ? (int)native_window_->isVisible() : -1);
         if (native_window_->isVisible()) return;
         log_message("INFO", "Shake — shelf shown");
         int w = std::max(100, settings_->shelf_position_width());
