@@ -2,6 +2,7 @@
 #include <core/mouse_shake/mouse_shake_detector.hpp>
 
 #include <atomic>
+#include <cstdio>
 
 namespace dd {
 
@@ -36,6 +37,14 @@ void set_shelf_visible(bool visible) {
 // Called each tick from Application::run_linux_loop with the screen
 // pointer position queried via the window's own X connection.
 void tick_mouse_monitor(int x, int y) {
+    static int cnt = 0;
+    static int last_x = -1, last_y = -1;
+    ++cnt;
+    if (cnt <= 3 || cnt % 300 == 0 || x != last_x || y != last_y) {
+        fprintf(stderr, "[shake] tick#%d pos=%d,%d changed=%d\n",
+                cnt, x, y, (x != last_x || y != last_y) ? 1 : 0);
+        last_x = x; last_y = y;
+    }
     if (g_detector && g_running.load(std::memory_order_acquire))
         g_detector->on_mouse_move(x, y);
 }

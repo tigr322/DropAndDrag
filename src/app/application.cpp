@@ -363,6 +363,8 @@ bool Application::init_mouse_shake() {
 #endif
 
     shake_detector_->set_callback([this]() {
+        fprintf(stderr, "[shake] CALLBACK visible=%d\n",
+                (int)native_window_->isVisible());
         if (native_window_->isVisible()) return;
         log_message("INFO", "Shake — shelf shown");
         int w = std::max(100, settings_->shelf_position_width());
