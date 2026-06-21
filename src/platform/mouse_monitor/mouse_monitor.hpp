@@ -40,4 +40,11 @@ bool is_mouse_monitor_running();
 // Call with true when the shelf is shown, false when it is hidden.
 void set_shelf_visible(bool visible);
 
+#if defined(__linux__)
+// Feed the current absolute screen cursor position into the shake detector.
+// Called each main-loop tick from Application::run_linux_loop so the
+// window's X connection (not a stale separate one) drives detection.
+void tick_mouse_monitor(int x, int y);
+#endif
+
 } // namespace dd

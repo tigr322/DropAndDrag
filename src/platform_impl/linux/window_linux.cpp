@@ -365,6 +365,14 @@ public:
         }
     }
 
+    bool getScreenPointerPos(int& x, int& y) const noexcept override {
+        Window root_ret, child_ret;
+        int wx, wy;
+        unsigned int state;
+        return XQueryPointer(display_, root_, &root_ret, &child_ret,
+                             &x, &y, &wx, &wy, &state) != 0;
+    }
+
 private:
     void setWindowType() {
         Atom type = net_wm_window_type_utility_;

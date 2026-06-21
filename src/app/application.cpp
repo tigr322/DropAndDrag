@@ -363,8 +363,6 @@ bool Application::init_mouse_shake() {
 #endif
 
     shake_detector_->set_callback([this]() {
-        fprintf(stderr, "[shake] callback fired! visible=%d\n",
-                native_window_ ? (int)native_window_->isVisible() : -1);
         if (native_window_->isVisible()) return;
         log_message("INFO", "Shake — shelf shown");
         int w = std::max(100, settings_->shelf_position_width());
@@ -563,6 +561,16 @@ int Application::run_linux_loop() {
     log_message("INFO", "Entering Linux event loop");
     while (running_.load(std::memory_order_acquire)) {
         if (native_window_) native_window_->processEvents();
+
+        // Feed cursor position from the window's own X connection into the
+        // shake detector.  A separate X connection gets stale positions on
+        // XWayland; using display_ here keeps it accurate.
+        if (native_window_ && shake_detector_) {
+            int px, py;
+            if (native_window_->getScreenPointerPos(px, py))
+                tick_mouse_monitor(px, py);
+        }
+
         std::this_thread::sleep_for(std::chrono::milliseconds(4));
     }
     log_message("INFO", "Exiting Linux event loop");

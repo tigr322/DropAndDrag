@@ -107,6 +107,12 @@ public:
     // Pump pending platform events. Called each tick on Linux; no-op elsewhere.
     virtual void processEvents() {}
 
+    // Return current screen-relative cursor position.  Returns false if
+    // the platform cannot determine it.  Default is a no-op.
+    virtual bool getScreenPointerPos(int& x, int& y) const noexcept {
+        x = 0; y = 0; return false;
+    }
+
     // Platform factory — links against the appropriate platform_impl/ module.
     static std::unique_ptr<NativeWindow> create(WindowStyle style);
 };
