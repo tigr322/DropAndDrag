@@ -49,8 +49,6 @@ bool init_xinput2() {
     mask.mask_len = XIMaskLen(XI_LASTEVENT);
     mask.mask = static_cast<unsigned char*>(calloc(mask.mask_len, 1));
     XISetMask(mask.mask, XI_RawMotion);
-    XISetMask(mask.mask, XI_ButtonPress);
-    XISetMask(mask.mask, XI_ButtonRelease);
 
     XISelectEvents(g_display, g_root, &mask, 1);
     free(mask.mask);
@@ -69,41 +67,17 @@ void poll_loop() {
                 event.xcookie.extension == xi_opcode) {
                 XGetEventData(g_display, &event.xcookie);
 
-                switch (event.xcookie.evtype) {
-                    case XI_RawMotion: {
-                        // XI_RawMotion gives relative deltas; we need absolute
-                        // screen coordinates for the shake algorithm, so query
-                        // the pointer position directly.
+                if (event.xcookie.evtype == XI_RawMotion) {
+                        // XI_RawMotion gives relative deltas; query absolute
+                        // position via XQueryPointer for the shake algorithm.
                         Window root_ret, child_ret;
                         int rx, ry, wx, wy;
                         unsigned int state;
                         if (XQueryPointer(g_display, g_root, &root_ret, &child_ret,
                                          &rx, &ry, &wx, &wy, &state)) {
                             g_detector->on_mouse_move(rx, ry);
-                            bool btn = (state & (Button1Mask | Button2Mask |
-                                                 Button3Mask | Button4Mask |
-                                                 Button5Mask)) != 0;
-                            g_detector->set_mouse_button_down(btn);
                         }
-                        break;
                     }
-                    case XI_ButtonPress:
-                        g_detector->set_mouse_button_down(true);
-                        break;
-                    case XI_ButtonRelease: {
-                        Window root, child;
-                        int rx, ry, wx, wy;
-                        unsigned int mask;
-                        if (XQueryPointer(g_display, g_root, &root, &child,
-                                         &rx, &ry, &wx, &wy, &mask)) {
-                            bool any = (mask & (Button1Mask | Button2Mask |
-                                                Button3Mask | Button4Mask |
-                                                Button5Mask)) != 0;
-                            g_detector->set_mouse_button_down(any);
-                        }
-                        break;
-                    }
-                }
 
                 XFreeEventData(g_display, &event.xcookie);
             }
@@ -118,6 +92,10 @@ bool start_mouse_monitor(MouseShakeDetector& detector) {
     if (g_running.load(std::memory_order_acquire)) return true;
 
     g_detector = &detector;
+    // On Linux, XQueryPointer doesn't see button state from Wayland-native
+    // drags (e.g. GTK4 Nautilus on GNOME/Wayland).  Treat button as always
+    // held so shake detection fires on movement alone.
+    g_detector->set_mouse_button_down(true);
 
     if (!init_xinput2()) return false;
 

@@ -9,7 +9,17 @@
 #include <cstdlib>
 #include <iostream>
 
+#if defined(__linux__)
+#include <X11/Xlib.h>
+#endif
+
 int main(int argc, char* argv[]) {
+#if defined(__linux__)
+    // Must be the very first Xlib call in the process so that Xlib is
+    // safe for concurrent use from the mouse-monitor poll thread and the
+    // main event loop.
+    XInitThreads();
+#endif
     auto& app = dd::Application::instance();
 
     if (!app.init(argc, argv)) {
