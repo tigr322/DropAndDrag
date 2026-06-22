@@ -98,6 +98,7 @@ std::thread          g_wl_thread;
 std::atomic<int32_t> g_wl_dx{0};
 std::atomic<int32_t> g_wl_dy{0};
 std::atomic<int32_t> g_wl_gen{0};
+std::atomic<bool>    g_wl_button{false};  // left-button state from wl_pointer events
 
 static void on_rel_motion(void*, zwp_relative_pointer_v1*,
     uint32_t, uint32_t,
@@ -121,8 +122,16 @@ static void on_registry_global(void*, wl_registry* reg, uint32_t name,
 }
 static void on_registry_remove(void*, wl_registry*, uint32_t) {}
 static const wl_registry_listener s_reg_listener = { on_registry_global, on_registry_remove };
-// Zero-init pointer listener: libwayland skips null function pointers safely.
-static const wl_pointer_listener s_ptr_listener = {};
+
+// Track left-button state via wl_pointer so shake only fires while dragging
+// (even when cursor is over Wayland-native windows where XQueryPointer is stale).
+// BTN_LEFT = 0x110, WL_POINTER_BUTTON_STATE_PRESSED = 1.
+static void on_ptr_button(void*, wl_pointer*, uint32_t, uint32_t,
+                           uint32_t btn, uint32_t state) noexcept {
+    if (btn == 0x110)
+        g_wl_button.store(state == 1, std::memory_order_relaxed);
+}
+static const wl_pointer_listener s_ptr_listener = { .button = on_ptr_button };
 
 static void wl_thread_func() {
     g_wl.display = wl_display_connect(nullptr);
@@ -255,13 +264,17 @@ void set_shelf_visible(bool visible) {
         g_detector->set_mouse_button_down(false);
 }
 
-void tick_mouse_monitor(int fallback_x, int fallback_y) {
+void tick_mouse_monitor(int fallback_x, int fallback_y, bool button_down) {
     if (!g_detector || !g_running.load(std::memory_order_acquire)) return;
 
-    // On Linux/XWayland, button state from XQueryPointer is unreliable when
-    // the cursor is over Wayland-native windows (the compositor owns those events).
-    // Always enable shake detection so the shelf can be shown with a shake gesture.
-    g_detector->set_mouse_button_down(true);
+    // Merge button state: XQueryPointer (reliable over X11 territory) OR
+    // wl_pointer.button (reliable when our Wayland surface has focus).
+    // Both are false when cursor is over a Wayland-native window we don't own —
+    // in that case no shake fires, which is the correct safe default.
+#if defined(HAVE_WL_RELATIVE_POINTER)
+    button_down = button_down || g_wl_button.load(std::memory_order_relaxed);
+#endif
+    g_detector->set_mouse_button_down(button_down);
 
     bool got_any = false;
 

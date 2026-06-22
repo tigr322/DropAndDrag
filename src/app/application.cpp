@@ -591,12 +591,14 @@ int Application::run_linux_loop() {
     while (running_.load(std::memory_order_acquire)) {
         if (native_window_) native_window_->processEvents();
 
-        // Feed XQueryPointer position as fallback into the shake detector.
-        // XRecord (if compiled in) provides primary tracking in a background thread.
+        // Feed cursor position and button state into the shake detector.
+        // XRecord/Wayland relative pointer handles motion in background threads;
+        // XQueryPointer gives us real button state for X11/XWayland territory.
         if (native_window_ && shake_detector_) {
             int px = 0, py = 0;
-            native_window_->getScreenPointerPos(px, py);
-            tick_mouse_monitor(px, py);
+            bool btn = false;
+            native_window_->getScreenPointerPos(px, py, &btn);
+            tick_mouse_monitor(px, py, btn);
         }
 
         std::this_thread::sleep_for(std::chrono::milliseconds(4));
