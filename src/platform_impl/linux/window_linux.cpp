@@ -10,6 +10,7 @@
 #include <X11/keysym.h>
 
 #include <platform/hotkeys/hotkeys.hpp>
+#include <platform/mouse_monitor/mouse_monitor.hpp>
 
 #include <algorithm>
 #include <atomic>
@@ -624,8 +625,6 @@ private:
         unsigned int n = 0;
         if (!XQueryTree(display_, root_, &root_ret, &parent_ret, &children, &n) || !children)
             return None;
-
-        ::Window best = None;
         for (int i = static_cast<int>(n) - 1; i >= 0; --i) {
             ::Window w = children[i];
             XWindowAttributes wa;
