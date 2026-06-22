@@ -401,20 +401,41 @@ private:
             break;
 
         case MotionNotify:
-            if (mouse_move_callback_) {
+            if (drag_window_) {
+                int dx = ev.xmotion.x_root - drag_root_x_;
+                int dy = ev.xmotion.y_root - drag_root_y_;
+                XMoveWindow(display_, window_, drag_win_x_ + dx, drag_win_y_ + dy);
+                XFlush(display_);
+            } else if (mouse_move_callback_) {
                 mouse_move_callback_(ev.xmotion.x, ev.xmotion.y);
             }
             break;
 
         case ButtonPress:
-            if (mouse_down_callback_) {
+            // Title-bar drag: left button above the divider line (y < 28)
+            // but not over the two button dots (x < 50).
+            if (ev.xbutton.button == Button1 &&
+                ev.xbutton.y < 28 && ev.xbutton.x >= 50) {
+                drag_window_ = true;
+                drag_root_x_ = ev.xbutton.x_root;
+                drag_root_y_ = ev.xbutton.y_root;
+                auto b = getBounds();
+                drag_win_x_  = b.x;
+                drag_win_y_  = b.y;
+                XGrabPointer(display_, window_, False,
+                             PointerMotionMask | ButtonReleaseMask,
+                             GrabModeAsync, GrabModeAsync, None, None, CurrentTime);
+            } else if (mouse_down_callback_) {
                 mouse_down_callback_(ev.xbutton.x, ev.xbutton.y,
                                      x11ButtonToEnum(ev.xbutton.button));
             }
             break;
 
         case ButtonRelease:
-            if (mouse_up_callback_) {
+            if (drag_window_ && ev.xbutton.button == Button1) {
+                drag_window_ = false;
+                XUngrabPointer(display_, CurrentTime);
+            } else if (mouse_up_callback_) {
                 mouse_up_callback_(ev.xbutton.x, ev.xbutton.y,
                                    x11ButtonToEnum(ev.xbutton.button));
             }
@@ -486,6 +507,13 @@ private:
     Atom net_wm_window_type_utility_;
     Atom net_wm_window_opacity_;
     Atom text_uri_list_;
+
+    // Title-bar window drag state
+    bool drag_window_  = false;
+    int  drag_root_x_  = 0;
+    int  drag_root_y_  = 0;
+    int  drag_win_x_   = 0;
+    int  drag_win_y_   = 0;
 
     PaintCallback paint_callback_;
     ResizeCallback resize_callback_;

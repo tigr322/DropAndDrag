@@ -4,6 +4,7 @@
 #include "theme.hpp"
 
 #include <X11/Xlib.h>
+#include <clocale>
 #include <cstdlib>
 #include <cstring>
 #include <string_view>
@@ -16,12 +17,13 @@ namespace dd {
 // handle is valid from both connections.
 
 struct X11Draw {
-    Display* dpy    = nullptr;
-    ::Window  win    = 0;
-    GC        gcBg   = nullptr;
-    GC        gcFg   = nullptr;
-    GC        gcRed  = nullptr;
-    GC        gcBlue = nullptr;
+    Display*  dpy     = nullptr;
+    ::Window   win     = 0;
+    XFontSet  fontset = nullptr;
+    GC        gcBg    = nullptr;
+    GC        gcFg    = nullptr;
+    GC        gcRed   = nullptr;
+    GC        gcBlue  = nullptr;
 };
 
 static X11Draw g_xd;
@@ -43,11 +45,12 @@ static GC mkgc(Display* dpy, ::Window win, unsigned r, unsigned g, unsigned b, i
 }
 
 Renderer::~Renderer() {
-    if (g_xd.gcBg)   { XFreeGC(g_xd.dpy, g_xd.gcBg);   g_xd.gcBg   = nullptr; }
-    if (g_xd.gcFg)   { XFreeGC(g_xd.dpy, g_xd.gcFg);   g_xd.gcFg   = nullptr; }
-    if (g_xd.gcRed)  { XFreeGC(g_xd.dpy, g_xd.gcRed);  g_xd.gcRed  = nullptr; }
-    if (g_xd.gcBlue) { XFreeGC(g_xd.dpy, g_xd.gcBlue); g_xd.gcBlue = nullptr; }
-    if (g_xd.dpy)    { XCloseDisplay(g_xd.dpy);         g_xd.dpy    = nullptr; }
+    if (g_xd.fontset) { XFreeFontSet(g_xd.dpy, g_xd.fontset); g_xd.fontset = nullptr; }
+    if (g_xd.gcBg)    { XFreeGC(g_xd.dpy, g_xd.gcBg);         g_xd.gcBg    = nullptr; }
+    if (g_xd.gcFg)    { XFreeGC(g_xd.dpy, g_xd.gcFg);         g_xd.gcFg    = nullptr; }
+    if (g_xd.gcRed)   { XFreeGC(g_xd.dpy, g_xd.gcRed);        g_xd.gcRed   = nullptr; }
+    if (g_xd.gcBlue)  { XFreeGC(g_xd.dpy, g_xd.gcBlue);       g_xd.gcBlue  = nullptr; }
+    if (g_xd.dpy)     { XCloseDisplay(g_xd.dpy);               g_xd.dpy     = nullptr; }
 }
 
 bool Renderer::init(void* view, int w, int h) {
@@ -63,10 +66,22 @@ bool Renderer::init(void* view, int w, int h) {
 
     g_xd.dpy    = dpy;
     g_xd.win    = xid;
-    g_xd.gcBg   = mkgc(dpy, xid, 0x1E, 0x1E, 0x2E, scr);  // dark bg
-    g_xd.gcFg   = mkgc(dpy, xid, 0xCD, 0xD6, 0xF4, scr);  // light text
-    g_xd.gcRed  = mkgc(dpy, xid, 0xF3, 0x8B, 0xA8, scr);  // hide button
-    g_xd.gcBlue = mkgc(dpy, xid, 0x89, 0xB4, 0xFA, scr);  // clear button
+    g_xd.gcBg   = mkgc(dpy, xid, 0x1E, 0x1E, 0x2E, scr);
+    g_xd.gcFg   = mkgc(dpy, xid, 0xCD, 0xD6, 0xF4, scr);
+    g_xd.gcRed  = mkgc(dpy, xid, 0xF3, 0x8B, 0xA8, scr);
+    g_xd.gcBlue = mkgc(dpy, xid, 0x89, 0xB4, 0xFA, scr);
+
+    // Font set for UTF-8 text rendering (Xutf8DrawString).
+    std::setlocale(LC_ALL, "");
+    XSetLocaleModifiers("");
+    char** miss = nullptr; int miss_n = 0; char* def = nullptr;
+    g_xd.fontset = XCreateFontSet(dpy,
+        "-*-dejavu sans-medium-r-normal-*-14-*,"
+        "-*-liberation sans-medium-r-normal-*-14-*,"
+        "-*-*-medium-r-*-*-14-*-*-*-*-*-*-*,"
+        "*",
+        &miss, &miss_n, &def);
+    if (miss) XFreeStringList(miss);
 
     XSetWindowBackground(dpy, xid, xcolor(dpy, scr, 0x1E, 0x1E, 0x2E));
     XClearWindow(dpy, xid);
@@ -84,26 +99,32 @@ void Renderer::render(float) {
 
     XFillRectangle(dpy, win, g_xd.gcBg, 0, 0, width_, height_);
 
-    // Buttons: red = hide, blue = clear
+    // Buttons: red = hide (x 8-22), blue = clear (x 28-42)
     XFillArc(dpy, win, g_xd.gcRed,  8, 7, 14, 14, 0, 360 * 64);
     XFillArc(dpy, win, g_xd.gcBlue, 28, 7, 14, 14, 0, 360 * 64);
 
-    // Title
-    const char* title = "DropAndDrag";
-    XDrawString(dpy, win, g_xd.gcFg, 50, 19, title, static_cast<int>(strlen(title)));
+    // Helper: draw UTF-8 text (falls back to XDrawString if no font set)
+    auto utf8 = [&](GC gc, int x, int y, const char* s) {
+        int n = static_cast<int>(strlen(s));
+        if (g_xd.fontset)
+            Xutf8DrawString(dpy, win, g_xd.fontset, gc, x, y, s, n);
+        else
+            XDrawString(dpy, win, gc, x, y, s, n);
+    };
+
+    utf8(g_xd.gcFg, 50, 19, "DropAndDrag");
 
     // Divider
     XDrawLine(dpy, win, g_xd.gcFg, 0, 27, width_, 27);
 
     const auto& items = *shared_items_;
     if (items.empty()) {
-        const char* hint = "Drop files here — shake to toggle";
-        XDrawString(dpy, win, g_xd.gcFg, 8, 47, hint, static_cast<int>(strlen(hint)));
+        utf8(g_xd.gcFg, 8, 47, "Drop files here - shake to toggle");
     } else {
         int y = 44;
         for (const auto& item : items) {
             const std::string nm = item.data.file_name.value_or(item.data.path.value_or("?"));
-            XDrawString(dpy, win, g_xd.gcFg, 8, y, nm.c_str(), static_cast<int>(nm.size()));
+            utf8(g_xd.gcFg, 8, y, nm.c_str());
             y += 18;
             if (y > height_ - 6) break;
         }
