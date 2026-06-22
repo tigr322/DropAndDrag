@@ -41,12 +41,13 @@ bool is_mouse_monitor_running();
 void set_shelf_visible(bool visible);
 
 #if defined(__linux__)
-// Feed the current cursor position and button state into the shake detector.
+// Feed the current cursor position into the shake detector.
 // Called each main-loop tick from Application::run_linux_loop.
-// button_down comes from XQueryPointer (reliable for X11/XWayland territory).
-// For cursor-over-Wayland-native-window cases the Wayland wl_pointer.button
-// event is tracked internally; this call merges both sources.
-void tick_mouse_monitor(int fallback_x, int fallback_y, bool button_down);
+// Button state is not tracked: on XWayland, XQueryPointer returns stale state
+// for buttons pressed/released over Wayland-native windows, so it is unusable.
+// Instead the detector always treats the button as held and relies on tight
+// thresholds (set in Application::init_mouse_shake) to prevent false triggers.
+void tick_mouse_monitor(int fallback_x, int fallback_y);
 #endif
 
 } // namespace dd

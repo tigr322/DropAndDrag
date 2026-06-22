@@ -354,11 +354,13 @@ bool Application::init_mouse_shake() {
     shake_detector_ = std::make_unique<MouseShakeDetector>(shake_cfg);
 
 #if defined(__linux__)
-    // Looser thresholds for Linux: fewer reversals, wider time window,
-    // smaller dead zone — compensates for XI2 event rate differences.
-    shake_cfg.direction_changes = 3;
-    shake_cfg.dead_zone_px      = 4;
-    shake_cfg.time_window       = std::chrono::milliseconds(800);
+    // Linux: button state is unreliable on XWayland (stale XQueryPointer),
+    // so the detector always sees button_down=true.  Use tight thresholds
+    // to prevent normal mouse movement from being mistaken for a shake:
+    // 5 large (≥20 px) direction reversals within 400 ms = deliberate shake.
+    shake_cfg.direction_changes = 5;
+    shake_cfg.dead_zone_px      = 20;
+    shake_cfg.time_window       = std::chrono::milliseconds(400);
     shake_detector_->set_config(shake_cfg);
 #endif
 
@@ -591,14 +593,13 @@ int Application::run_linux_loop() {
     while (running_.load(std::memory_order_acquire)) {
         if (native_window_) native_window_->processEvents();
 
-        // Feed cursor position and button state into the shake detector.
-        // XRecord/Wayland relative pointer handles motion in background threads;
-        // XQueryPointer gives us real button state for X11/XWayland territory.
+        // Feed cursor position into the shake detector.
+        // Motion is captured by the Wayland relative-pointer or XRecord thread;
+        // the absolute position here is only used as a fallback coordinate.
         if (native_window_ && shake_detector_) {
             int px = 0, py = 0;
-            bool btn = false;
-            native_window_->getScreenPointerPos(px, py, &btn);
-            tick_mouse_monitor(px, py, btn);
+            native_window_->getScreenPointerPos(px, py);
+            tick_mouse_monitor(px, py);
         }
 
         std::this_thread::sleep_for(std::chrono::milliseconds(4));

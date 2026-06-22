@@ -98,8 +98,6 @@ std::thread          g_wl_thread;
 std::atomic<int32_t> g_wl_dx{0};
 std::atomic<int32_t> g_wl_dy{0};
 std::atomic<int32_t> g_wl_gen{0};
-std::atomic<bool>    g_wl_button{false};  // left-button state from wl_pointer events
-
 static void on_rel_motion(void*, zwp_relative_pointer_v1*,
     uint32_t, uint32_t,
     wl_fixed_t /*dx*/, wl_fixed_t /*dy*/,
@@ -112,6 +110,7 @@ static void on_rel_motion(void*, zwp_relative_pointer_v1*,
 static const zwp_relative_pointer_v1_listener s_rel_listener = { on_rel_motion };
 
 static void on_registry_global(void*, wl_registry* reg, uint32_t name,
+
     const char* iface, uint32_t) {
     if (std::strcmp(iface, wl_seat_interface.name) == 0 && !g_wl.seat)
         g_wl.seat = static_cast<wl_seat*>(
@@ -122,16 +121,6 @@ static void on_registry_global(void*, wl_registry* reg, uint32_t name,
 }
 static void on_registry_remove(void*, wl_registry*, uint32_t) {}
 static const wl_registry_listener s_reg_listener = { on_registry_global, on_registry_remove };
-
-// Track left-button state via wl_pointer so shake only fires while dragging
-// (even when cursor is over Wayland-native windows where XQueryPointer is stale).
-// BTN_LEFT = 0x110, WL_POINTER_BUTTON_STATE_PRESSED = 1.
-static void on_ptr_button(void*, wl_pointer*, uint32_t, uint32_t,
-                           uint32_t btn, uint32_t state) noexcept {
-    if (btn == 0x110)
-        g_wl_button.store(state == 1, std::memory_order_relaxed);
-}
-static const wl_pointer_listener s_ptr_listener = { .button = on_ptr_button };
 
 static void wl_thread_func() {
     g_wl.display = wl_display_connect(nullptr);
@@ -150,8 +139,10 @@ static void wl_thread_func() {
         return;
     }
 
+    // wl_pointer is required by zwp_relative_pointer_manager_v1_get_relative_pointer.
+    // We do NOT add a button listener: wl_pointer.button only fires for surfaces WE own,
+    // and we have no Wayland surfaces, so those events would never arrive anyway.
     g_wl.pointer = wl_seat_get_pointer(g_wl.seat);
-    wl_pointer_add_listener(g_wl.pointer, &s_ptr_listener, nullptr);
     g_wl.rel = zwp_relative_pointer_manager_v1_get_relative_pointer(g_wl.mgr, g_wl.pointer);
     zwp_relative_pointer_v1_add_listener(g_wl.rel, &s_rel_listener, nullptr);
     wl_display_roundtrip(g_wl.display);
@@ -264,23 +255,21 @@ void set_shelf_visible(bool visible) {
         g_detector->set_mouse_button_down(false);
 }
 
-void tick_mouse_monitor(int fallback_x, int fallback_y, bool button_down) {
+void tick_mouse_monitor(int fallback_x, int fallback_y) {
     if (!g_detector || !g_running.load(std::memory_order_acquire)) return;
 
-    // Merge button state: XQueryPointer (reliable over X11 territory) OR
-    // wl_pointer.button (reliable when our Wayland surface has focus).
-    // Both are false when cursor is over a Wayland-native window we don't own —
-    // in that case no shake fires, which is the correct safe default.
-#if defined(HAVE_WL_RELATIVE_POINTER)
-    button_down = button_down || g_wl_button.load(std::memory_order_relaxed);
-#endif
-    g_detector->set_mouse_button_down(button_down);
+    // Button state is always "held" on Linux.  XQueryPointer returns stale state
+    // on XWayland (releases over Wayland-native surfaces are not propagated back
+    // to X11), and wl_pointer.button events are only delivered to surfaces WE
+    // own — which is none.  The shake thresholds (set in init_mouse_shake) are
+    // tight enough that normal mouse movement cannot produce a false trigger.
+    g_detector->set_mouse_button_down(true);
 
     bool got_any = false;
 
 #if defined(HAVE_WL_RELATIVE_POINTER)
-    // Priority 1: Wayland relative motion — works even when cursor is over
-    // Wayland-native windows like Nautilus.  Uses unaccelerated deltas.
+    // Priority 1: Wayland relative motion — broadcasts to all clients regardless
+    // of focus, so it works even when cursor is over Nautilus or other Wayland apps.
     if (int gen = g_wl_gen.exchange(0, std::memory_order_acq_rel); gen > 0) {
         g_virt_x += g_wl_dx.exchange(0, std::memory_order_relaxed);
         g_virt_y += g_wl_dy.exchange(0, std::memory_order_relaxed);
@@ -289,7 +278,9 @@ void tick_mouse_monitor(int fallback_x, int fallback_y, bool button_down) {
 #endif
 
 #if defined(HAVE_XRECORD)
-    {
+    // Priority 2: XRecord absolute positions — only when Wayland is not active,
+    // to avoid double-counting the same physical motion.
+    if (!got_any) {
         int cur_gen = g_rec_gen.load(std::memory_order_acquire);
         if (cur_gen != g_rec_last_gen) {
             g_rec_last_gen = cur_gen;
