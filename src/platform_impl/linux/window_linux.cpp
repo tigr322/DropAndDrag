@@ -532,10 +532,11 @@ private:
         int cols = std::max(1, (b.width - 2 * margin) / 64);
         int row = (wy - 34) / (62 + 10);
         int itemsInRow = std::min(cols, count - row * cols);
+        if (row < 0 || itemsInRow <= 0) return -1;
         int rowW = (itemsInRow - 1) * 64 + 48;
         int rowX = (b.width - rowW) / 2;
         int col = (wx - rowX) / 64;
-        if (row < 0 || col < 0 || col >= itemsInRow) return -1;
+        if (col < 0 || col >= itemsInRow) return -1;
         int idx = row * cols + col;
         return (idx >= 0 && idx < count) ? idx : -1;
     }
@@ -570,28 +571,27 @@ private:
     void completeItemDrag() {
         if (drag_out_grab_) {
             XUngrabPointer(display_, CurrentTime);
+            XFlush(display_);
             drag_out_grab_ = false;
         }
 
-        // Find window under cursor
         ::Window target = findXdndWindow(drag_out_src_x_, drag_out_src_y_);
         if (target != None) {
             sendXdndDropToTarget(target, drag_out_src_x_, drag_out_src_y_);
-            XFlush(display_);
-            // Wait briefly for SelectionRequest / XdndFinished
-            XEvent ev;
-            while (true) {
+            XSync(display_, False);
+
+            // Wait up to ~500ms for SelectionRequest or XdndFinished
+            for (int i = 0; i < 50; ++i) {
+                XEvent ev;
                 if (XCheckTypedWindowEvent(display_, window_, SelectionRequest, &ev)) {
                     handleSelectionRequestOut(ev);
-                    continue;
                 }
-                if (XCheckTypedEvent(display_, ClientMessage, &ev)) {
+                if (XCheckTypedWindowEvent(display_, window_, ClientMessage, &ev)) {
                     if (static_cast<Atom>(ev.xclient.message_type) == xdnd_finished_) {
                         break;
                     }
-                    continue;
                 }
-                break;
+                usleep(10000);
             }
         }
 
@@ -605,6 +605,7 @@ private:
     ::Window findXdndWindow(int root_x, int root_y) {
         ::Window child = root_;
         ::Window result = None;
+        int abs_x = 0, abs_y = 0;
         while (true) {
             ::Window root_ret, parent_ret;
             ::Window* children = nullptr;
@@ -620,10 +621,14 @@ private:
                 XWindowAttributes wa;
                 if (!XGetWindowAttributes(display_, w, &wa)) continue;
                 if (wa.map_state != IsViewable) continue;
-                if (root_x >= wa.x && root_x < wa.x + wa.width &&
-                    root_y >= wa.y && root_y < wa.y + wa.height) {
+                int w_abs_x = abs_x + wa.x;
+                int w_abs_y = abs_y + wa.y;
+                if (root_x >= w_abs_x && root_x < w_abs_x + wa.width &&
+                    root_y >= w_abs_y && root_y < w_abs_y + wa.height) {
                     result = w;
                     child  = w;
+                    abs_x = w_abs_x;
+                    abs_y = w_abs_y;
                     found_child = true;
                     break;
                 }
@@ -639,7 +644,6 @@ private:
             if (XGetWindowProperty(display_, result, xa, 0, 1, False, XA_ATOM,
                                    &actual, &fmt, &n, &ba, &d) == Success && d) {
                 XFree(d);
-                // Window has XdndAware — accept it
             } else {
                 result = None;
             }
@@ -657,7 +661,7 @@ private:
         // XdndEnter
         ev.xclient.message_type = xdnd_enter_;
         ev.xclient.data.l[0] = static_cast<long>(window_);
-        ev.xclient.data.l[1] = 5; // version 5
+        ev.xclient.data.l[1] = 5UL << 24; // version 5
         ev.xclient.data.l[2] = static_cast<long>(text_uri_list_);
         ev.xclient.data.l[3] = 0;
         ev.xclient.data.l[4] = 0;
