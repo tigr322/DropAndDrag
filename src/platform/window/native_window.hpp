@@ -21,6 +21,8 @@
 #include <string_view>
 #include <vector>
 
+#include <core/items/item.hpp>
+
 namespace dd {
 
 // Screen rectangle in physical pixels (top-left origin on all platforms).
@@ -113,6 +115,9 @@ public:
     virtual bool getScreenPointerPos(int& x, int& y, bool* button_down = nullptr) const noexcept {
         x = 0; y = 0; return false;
     }
+
+    // Provide the item list for drag-out hit-testing (Linux only, no-op elsewhere).
+    virtual void setDragOutItems(std::shared_ptr<std::vector<Item>>) {}
 
     // Platform factory — links against the appropriate platform_impl/ module.
     static std::unique_ptr<NativeWindow> create(WindowStyle style);

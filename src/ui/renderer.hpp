@@ -57,6 +57,7 @@ public:
     [[nodiscard]] int  width()       const { return width_; }
     [[nodiscard]] int  height()      const { return height_; }
     [[nodiscard]] bool initialized() const { return ok_; }
+    [[nodiscard]] std::shared_ptr<ItemList> itemsPtr() const { return shared_items_; }
 
     // --- Action callbacks (wired by Application after init) ---
 

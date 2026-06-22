@@ -187,6 +187,15 @@ public:
 
         text_uri_list_ = ac.get(display_, "text/uri-list");
 
+        // XDnD source atoms for drag-out
+        xdnd_enter_       = ac.get(display_, "XdndEnter");
+        xdnd_position_    = ac.get(display_, "XdndPosition");
+        xdnd_status_      = ac.get(display_, "XdndStatus");
+        xdnd_drop_        = ac.get(display_, "XdndDrop");
+        xdnd_finished_    = ac.get(display_, "XdndFinished");
+        xdnd_selection_   = ac.get(display_, "XdndSelection");
+        xdnd_action_copy_ = ac.get(display_, "XdndActionCopy");
+
         setWindowType();
 
         // Announce XDnD protocol version 5 support so drag sources send us XdndEnter.
@@ -332,6 +341,7 @@ public:
     void setDragLeaveCallback(WindowDragLeaveCallback cb) override { drag_leave_callback_ = std::move(cb); }
     void setDropCallback(WindowDropCallback cb) override { drop_callback_ = std::move(cb); }
     void setCloseCallback(CloseCallback cb) override { close_callback_ = std::move(cb); }
+    void setDragOutItems(std::shared_ptr<std::vector<Item>> items) override { drag_out_items_ = std::move(items); }
 
     ::Window x11Window() const { return window_; }
     Display* display() const { return display_; }
@@ -406,6 +416,14 @@ private:
                 int dy = ev.xmotion.y_root - drag_root_y_;
                 XMoveWindow(display_, window_, drag_win_x_ + dx, drag_win_y_ + dy);
                 XFlush(display_);
+            } else if (drag_out_item_idx_ >= 0 && !drag_out_active_) {
+                int dx = std::abs(ev.xmotion.x_root - drag_out_start_x_);
+                int dy = std::abs(ev.xmotion.y_root - drag_out_start_y_);
+                if (dx > 5 || dy > 5)
+                    beginItemDrag(drag_out_item_idx_);
+            } else if (drag_out_active_) {
+                drag_out_src_x_ = ev.xmotion.x_root;
+                drag_out_src_y_ = ev.xmotion.y_root;
             } else if (mouse_move_callback_) {
                 mouse_move_callback_(ev.xmotion.x, ev.xmotion.y);
             }
@@ -425,6 +443,14 @@ private:
                 XGrabPointer(display_, window_, False,
                              PointerMotionMask | ButtonReleaseMask,
                              GrabModeAsync, GrabModeAsync, None, None, CurrentTime);
+            } else if (ev.xbutton.button == Button1 && ev.xbutton.y >= 28 && drag_out_items_) {
+                int idx = hitTestItem(ev.xbutton.x, ev.xbutton.y);
+                if (idx >= 0) {
+                    drag_out_item_idx_ = idx;
+                    drag_out_start_x_  = ev.xbutton.x_root;
+                    drag_out_start_y_  = ev.xbutton.y_root;
+                    drag_out_active_   = false;
+                }
             } else if (mouse_down_callback_) {
                 mouse_down_callback_(ev.xbutton.x, ev.xbutton.y,
                                      x11ButtonToEnum(ev.xbutton.button));
@@ -435,6 +461,14 @@ private:
             if (drag_window_ && ev.xbutton.button == Button1) {
                 drag_window_ = false;
                 XUngrabPointer(display_, CurrentTime);
+            } else if (drag_out_active_ && ev.xbutton.button == Button1) {
+                completeItemDrag();
+            } else if (drag_out_item_idx_ >= 0) {
+                drag_out_item_idx_ = -1;
+                if (mouse_up_callback_) {
+                    mouse_up_callback_(ev.xbutton.x, ev.xbutton.y,
+                                      x11ButtonToEnum(ev.xbutton.button));
+                }
             } else if (mouse_up_callback_) {
                 mouse_up_callback_(ev.xbutton.x, ev.xbutton.y,
                                    x11ButtonToEnum(ev.xbutton.button));
@@ -463,6 +497,10 @@ private:
             handleSelectionNotify(ev);
             break;
 
+        case SelectionRequest:
+            handleSelRequest(ev);
+            break;
+
         case ClientMessage: {
             auto& ac = AtomCache::instance();
             Atom wm_protos = ac.get(display_, "WM_PROTOCOLS");
@@ -484,6 +522,191 @@ private:
 
     void handleDragDropEvent(const XEvent& ev);
     void handleSelectionNotify(const XEvent& ev);
+
+    int hitTestItem(int wx, int wy) {
+        if (!drag_out_items_) return -1;
+        int count = static_cast<int>(drag_out_items_->size());
+        if (count == 0 || wy < 34) return -1;
+        constexpr int margin = 8;
+        auto b = getBounds();
+        int cols = std::max(1, (b.width - 2 * margin) / 64);
+        int row = (wy - 34) / (62 + 10);
+        int itemsInRow = std::min(cols, count - row * cols);
+        int rowW = (itemsInRow - 1) * 64 + 48;
+        int rowX = (b.width - rowW) / 2;
+        int col = (wx - rowX) / 64;
+        if (row < 0 || col < 0 || col >= itemsInRow) return -1;
+        int idx = row * cols + col;
+        return (idx >= 0 && idx < count) ? idx : -1;
+    }
+
+    void beginItemDrag(int idx) {
+        if (!drag_out_items_ || idx < 0 || idx >= static_cast<int>(drag_out_items_->size()))
+            return;
+        const auto& item = (*drag_out_items_)[idx];
+        std::string path = item.data.path.value_or("");
+        if (path.empty()) return;
+        std::string uri = "file://" + path + "\r\n";
+
+        XSetSelectionOwner(display_, xdnd_selection_, window_, CurrentTime);
+
+        // Store the URI as a property on our window in case another app requests it
+        auto& ac = AtomCache::instance();
+        Atom xa_str = ac.get(display_, "STRING");
+        XChangeProperty(display_, window_, text_uri_list_, xa_str, 8,
+                        PropModeReplace,
+                        reinterpret_cast<const unsigned char*>(uri.data()),
+                        static_cast<int>(uri.size()));
+
+        XGrabPointer(display_, root_, False,
+                     PointerMotionMask | ButtonReleaseMask,
+                     GrabModeAsync, GrabModeAsync, None, None, CurrentTime);
+        drag_out_active_ = true;
+        drag_out_grab_   = true;
+
+        hide();
+    }
+
+    void completeItemDrag() {
+        if (drag_out_grab_) {
+            XUngrabPointer(display_, CurrentTime);
+            drag_out_grab_ = false;
+        }
+
+        // Find window under cursor
+        ::Window target = findXdndWindow(drag_out_src_x_, drag_out_src_y_);
+        if (target != None) {
+            sendXdndDropToTarget(target, drag_out_src_x_, drag_out_src_y_);
+            XFlush(display_);
+            // Wait briefly for SelectionRequest / XdndFinished
+            XEvent ev;
+            while (true) {
+                if (XCheckTypedWindowEvent(display_, window_, SelectionRequest, &ev)) {
+                    handleSelectionRequestOut(ev);
+                    continue;
+                }
+                if (XCheckTypedEvent(display_, ClientMessage, &ev)) {
+                    if (static_cast<Atom>(ev.xclient.message_type) == xdnd_finished_) {
+                        break;
+                    }
+                    continue;
+                }
+                break;
+            }
+        }
+
+        XDeleteProperty(display_, window_, text_uri_list_);
+        drag_out_active_   = false;
+        drag_out_item_idx_ = -1;
+
+        show();
+    }
+
+    ::Window findXdndWindow(int root_x, int root_y) {
+        ::Window child = root_;
+        ::Window result = None;
+        while (true) {
+            ::Window root_ret, parent_ret;
+            ::Window* children = nullptr;
+            unsigned int nchildren = 0;
+            if (!XQueryTree(display_, child, &root_ret, &parent_ret,
+                           &children, &nchildren) || !children || nchildren == 0) {
+                result = child;
+                break;
+            }
+            bool found_child = false;
+            for (unsigned int i = 0; i < nchildren; ++i) {
+                ::Window w = children[i];
+                XWindowAttributes wa;
+                if (!XGetWindowAttributes(display_, w, &wa)) continue;
+                if (wa.map_state != IsViewable) continue;
+                if (root_x >= wa.x && root_x < wa.x + wa.width &&
+                    root_y >= wa.y && root_y < wa.y + wa.height) {
+                    result = w;
+                    child  = w;
+                    found_child = true;
+                    break;
+                }
+            }
+            XFree(children);
+            if (!found_child) break;
+        }
+        if (result != None) {
+            auto& ac = AtomCache::instance();
+            Atom xa = ac.get(display_, "XdndAware");
+            Atom actual; int fmt; unsigned long n, ba;
+            unsigned char* d = nullptr;
+            if (XGetWindowProperty(display_, result, xa, 0, 1, False, XA_ATOM,
+                                   &actual, &fmt, &n, &ba, &d) == Success && d) {
+                XFree(d);
+                // Window has XdndAware — accept it
+            } else {
+                result = None;
+            }
+        }
+        return result;
+    }
+
+    void sendXdndDropToTarget(::Window target, int x, int y) {
+        XEvent ev{};
+        ev.xclient.type = ClientMessage;
+        ev.xclient.display = display_;
+        ev.xclient.window = target;
+        ev.xclient.format = 32;
+
+        // XdndEnter
+        ev.xclient.message_type = xdnd_enter_;
+        ev.xclient.data.l[0] = static_cast<long>(window_);
+        ev.xclient.data.l[1] = 5; // version 5
+        ev.xclient.data.l[2] = static_cast<long>(text_uri_list_);
+        ev.xclient.data.l[3] = 0;
+        ev.xclient.data.l[4] = 0;
+        XSendEvent(display_, target, False, NoEventMask, &ev);
+
+        // XdndPosition
+        ev.xclient.message_type = xdnd_position_;
+        ev.xclient.data.l[0] = static_cast<long>(window_);
+        ev.xclient.data.l[2] = (x << 16) | y;
+        ev.xclient.data.l[4] = static_cast<long>(xdnd_action_copy_);
+        XSendEvent(display_, target, False, NoEventMask, &ev);
+
+        // XdndDrop
+        ev.xclient.message_type = xdnd_drop_;
+        ev.xclient.data.l[0] = static_cast<long>(window_);
+        XSendEvent(display_, target, False, NoEventMask, &ev);
+    }
+
+    void handleSelRequest(const XEvent& ev) {
+        handleSelectionRequestOut(ev);
+    }
+
+    void handleSelectionRequestOut(const XEvent& ev) {
+        auto& ac = AtomCache::instance();
+        Atom actual_type; int actual_format;
+        unsigned long nitems, bytes_after;
+        unsigned char* data = nullptr;
+
+        if (XGetWindowProperty(display_, window_, text_uri_list_,
+                               0, 65536, False, AnyPropertyType,
+                               &actual_type, &actual_format,
+                               &nitems, &bytes_after, &data) == Success && data) {
+            XChangeProperty(display_, ev.xselectionrequest.requestor,
+                           ev.xselectionrequest.property,
+                           actual_type, actual_format,
+                           PropModeReplace, data, static_cast<int>(nitems));
+            XFree(data);
+        }
+
+        XEvent notify{};
+        notify.xselection.type      = SelectionNotify;
+        notify.xselection.display   = display_;
+        notify.xselection.requestor = ev.xselectionrequest.requestor;
+        notify.xselection.selection = ev.xselectionrequest.selection;
+        notify.xselection.target    = ev.xselectionrequest.target;
+        notify.xselection.property  = ev.xselectionrequest.property;
+        notify.xselection.time      = ev.xselectionrequest.time;
+        XSendEvent(display_, ev.xselectionrequest.requestor, False, NoEventMask, &notify);
+    }
 
     Display* display_;
     int screen_;
@@ -514,6 +737,24 @@ private:
     int  drag_root_y_  = 0;
     int  drag_win_x_   = 0;
     int  drag_win_y_   = 0;
+
+    // Item drag-out state (XDnD source)
+    int  drag_out_item_idx_ = -1;
+    int  drag_out_start_x_  = 0;
+    int  drag_out_start_y_  = 0;
+    int  drag_out_src_x_    = 0;
+    int  drag_out_src_y_    = 0;
+    bool drag_out_active_   = false;
+    bool drag_out_grab_     = false;
+    std::shared_ptr<std::vector<Item>> drag_out_items_;
+
+    Atom xdnd_selection_       = 0;
+    Atom xdnd_enter_           = 0;
+    Atom xdnd_position_        = 0;
+    Atom xdnd_status_          = 0;
+    Atom xdnd_drop_            = 0;
+    Atom xdnd_finished_        = 0;
+    Atom xdnd_action_copy_     = 0;
 
     PaintCallback paint_callback_;
     ResizeCallback resize_callback_;

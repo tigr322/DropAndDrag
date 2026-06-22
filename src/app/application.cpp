@@ -460,6 +460,9 @@ bool Application::init_ui() {
     // Start with empty shelf (hint text shown by drawShelf when items list is empty).
     renderer_->setItems({});
 
+    // Share the item list with the window for drag-out hit-testing.
+    native_window_->setDragOutItems(renderer_->itemsPtr());
+
 #if !defined(__APPLE__) && !defined(_WIN32)
     // Linux: wire paint callback (macOS uses setNeedsDisplay: / drawRect:).
     native_window_->setPaintCallback([this]() {
