@@ -78,27 +78,37 @@ static GC make_gc(Display* dpy, ::Window win, unsigned r, unsigned g, unsigned b
 }
 
 // ── Freedesktop icon-theme lookup ─────────────────────────────────────────
-// Searches standard paths for a named icon (e.g. "folder", "text-x-generic").
-// Returns filesystem path to the best available PNG, or empty string.
 
 static std::string find_icon_named(const std::string& name) {
     static const char* kThemes[] = {
-        "Adwaita", "hicolor", "gnome", "breeze", "Humanity", "elementary", nullptr
+        "Adwaita", "hicolor", "gnome", "breeze", "Breeze",
+        "Humanity", "elementary", "Papirus", "Yaru", "Mint-Y", nullptr
     };
-    static const char* kCats[] = {"mimetypes", "apps", "places", "devices", "actions", nullptr};
-    static const int   kSizes[] = {48, 64, 32, 128, 256, 0};
+    static const char* kSizes[] = {
+        "48x48", "64x64", "32x32", "128x128", "256x256",
+        "scalable", "symbolic", "48", "64", "32", nullptr
+    };
+    static const char* kCats[] = {
+        "mimetypes", "apps", "places", "devices", "actions", "categories", nullptr
+    };
 
-    for (int ti = 0; kThemes[ti]; ++ti) {
-        for (int si = 0; kSizes[si]; ++si) {
-            char sz[16];
-            snprintf(sz, sizeof(sz), "%dx%d", kSizes[si], kSizes[si]);
+        for (int ti = 0; kThemes[ti]; ++ti) {
+            for (int si = 0; kSizes[si]; ++si) {
+                for (int ci = 0; kCats[ci]; ++ci) {
+                    std::string p = "/usr/share/icons/" + std::string(kThemes[ti]) +
+                                    "/" + kSizes[si] + "/" + kCats[ci] + "/" + name + ".png";
+                    if (access(p.c_str(), R_OK) == 0) return p;
+                }
+            }
+        }
+        // Also try without size prefix
+        for (int ti = 0; kThemes[ti]; ++ti) {
             for (int ci = 0; kCats[ci]; ++ci) {
                 std::string p = "/usr/share/icons/" + std::string(kThemes[ti]) +
-                                "/" + sz + "/" + kCats[ci] + "/" + name + ".png";
+                                "/" + kCats[ci] + "/" + name + ".png";
                 if (access(p.c_str(), R_OK) == 0) return p;
             }
         }
-    }
     return {};
 }
 
@@ -142,18 +152,37 @@ static std::string ext_to_mime(const std::string& path) {
     return (it != kMap.end()) ? it->second : "application/octet-stream";
 }
 
-// MIME type → freedesktop icon name (simplified)
-static std::string mime_to_icon(const std::string& mime) {
-    if (mime.find("image/") == 0)    return "image-x-generic";
-    if (mime.find("text/") == 0)     return "text-x-generic";
-    if (mime.find("audio/") == 0)    return "audio-x-generic";
-    if (mime.find("video/") == 0)    return "video-x-generic";
-    if (mime.find("application/pdf") == 0) return "application-pdf";
-    if (mime.find("application/zip") == 0
-     || mime.find("application/gzip") == 0
-     || mime.find("application/x-tar") == 0
-     || mime.find("application/x-7z") == 0) return "package-x-generic";
-    return "text-x-generic";
+// MIME type → freedesktop icon names (try in order: specific → generic)
+static std::vector<std::string> mime_to_icon_names(const std::string& mime) {
+    std::vector<std::string> names;
+
+    // 1. Exact MIME icon name: text/plain → text-plain
+    std::string exact = mime;
+    for (auto& c : exact) if (c == '/') c = '-';
+    names.push_back(exact);
+
+    // 2. Category generic
+    if (mime.find("image/") == 0)      names.push_back("image-x-generic");
+    else if (mime.find("text/") == 0)  names.push_back("text-x-generic");
+    else if (mime.find("audio/") == 0) names.push_back("audio-x-generic");
+    else if (mime.find("video/") == 0) names.push_back("video-x-generic");
+    else if (mime.find("application/pdf") == 0)
+        names.push_back("application-pdf");
+    else if (mime.find("application/zip") == 0
+          || mime.find("application/gzip") == 0
+          || mime.find("application/x-tar") == 0
+          || mime.find("application/x-7z") == 0
+          || mime.find("application/x-rpm") == 0)
+        names.push_back("package-x-generic");
+    else if (mime.find("application/") == 0)
+        names.push_back("application-x-generic");
+    else if (mime.find("inode/") == 0)
+        names.push_back("folder");
+
+    // 3. Ultimate fallbacks
+    names.push_back("text-x-generic");
+    names.push_back("application-x-generic");
+    return names;
 }
 
 // ── Icon loading + pixmap cache ──────────────────────────────────────────
@@ -178,10 +207,18 @@ static std::vector<uint8_t> composite_rgba(const uint8_t* rgba, int w, int h) {
     return out;
 }
 
-// Simple box-filter downscale to fit within max_w×max_h
-static std::vector<uint8_t> downscale_rgba(const uint8_t* src, int sw, int sh, int max_w, int max_h) {
+// Simple box-filter downscale to fit within max_w×max_h.
+// Returns {data, dw, dh} — caller owns the vector.
+struct ScaledRGBA {
+    std::vector<uint8_t> data;
+    int w, h;
+};
+
+static ScaledRGBA downscale_rgba(const uint8_t* src, int sw, int sh, int max_w, int max_h) {
     float scale = std::min((float)max_w / sw, (float)max_h / sh);
-    if (scale >= 1.0f) return {src, src + sw * sh * 4};
+    if (scale >= 1.0f) {
+        return {{src, src + sw * sh * 4}, sw, sh};
+    }
     int dw = std::max(1, (int)(sw * scale));
     int dh = std::max(1, (int)(sh * scale));
     std::vector<uint8_t> out(dw * dh * 4);
@@ -202,7 +239,7 @@ static std::vector<uint8_t> downscale_rgba(const uint8_t* src, int sw, int sh, i
             out[oi]=r; out[oi+1]=g; out[oi+2]=b; out[oi+3]=a;
         }
     }
-    return out;
+    return {std::move(out), dw, dh};
 }
 
 // Load an image (icon or thumbnail) and return a composited pixmap
@@ -217,58 +254,51 @@ static CachedPixmap load_icon_pixmap(const std::string& img_path) {
     auto scaled = downscale_rgba(raw, w, h, kIconW, kIconH);
     stbi_image_free(raw);
 
-    int dw = 0, dh = 0;
-    for (int tw = kIconW; tw >= 1; --tw) {
-        if ((int)scaled.size() == tw * ((int)scaled.size() / tw) * 4) {
-            dw = tw;
-            dh = (int)scaled.size() / (dw * 4);
-            if (dh >= 1 && dw * dh * 4 == (int)scaled.size()) break;
-        }
-    }
-    if (dw == 0) { dw = kIconW; dh = kIconH; }
+    auto comp = composite_rgba(scaled.data.data(), scaled.w, scaled.h);
 
-    auto comp = composite_rgba(scaled.data(), dw, dh);
-
-    // Build XImage from pre-composited XRGB data.
-    // Allocate a fresh buffer; XDestroyImage will free it.
-    int bpl = dw * 4;
-    char* buf = static_cast<char*>(malloc(bpl * dh));
+    int bpl = scaled.w * 4;
+    char* buf = static_cast<char*>(malloc(bpl * scaled.h));
     memcpy(buf, comp.data(), comp.size());
     XImage* xi = XCreateImage(g_xd.dpy, DefaultVisual(g_xd.dpy, g_xd.screen),
-                               g_xd.depth, ZPixmap, 0, buf, dw, dh, 32, bpl);
+                               g_xd.depth, ZPixmap, 0, buf, scaled.w, scaled.h, 32, bpl);
     if (!xi) { free(buf); return {0,0,0}; }
 
-    Pixmap pm = XCreatePixmap(g_xd.dpy, g_xd.win, dw, dh, g_xd.depth);
+    Pixmap pm = XCreatePixmap(g_xd.dpy, g_xd.win, scaled.w, scaled.h, g_xd.depth);
     GC pm_gc = XCreateGC(g_xd.dpy, pm, 0, nullptr);
-    XPutImage(g_xd.dpy, pm, pm_gc, xi, 0, 0, 0, 0, dw, dh);
+    XPutImage(g_xd.dpy, pm, pm_gc, xi, 0, 0, 0, 0, scaled.w, scaled.h);
     XFreeGC(g_xd.dpy, pm_gc);
     XDestroyImage(xi);
 
-    CachedPixmap cp{pm, dw, dh};
+    CachedPixmap cp{pm, scaled.w, scaled.h};
     g_pixmapCache[img_path] = cp;
     return cp;
 }
 
 // ── Icon resolution for a shelf item ──────────────────────────────────────
-// Returns path to the best icon (system theme or file itself for images).
-// Empty means fall back to colored tile.
 
 static std::string icon_for_item(const Item& item) {
     std::string path = item.data.path.value_or("");
 
-    // Folder → folder icon
-    struct stat st;
-    if (!path.empty() && stat(path.c_str(), &st) == 0 && S_ISDIR(st.st_mode))
-        return find_icon_named("folder");
+    if (!path.empty()) {
+        struct stat st;
+        if (stat(path.c_str(), &st) == 0 && S_ISDIR(st.st_mode))
+            return find_icon_named("folder");
+        if (access(path.c_str(), R_OK) == 0 && is_image_ext(path))
+            return path;
+    }
 
-    // Image → use file itself as thumbnail
-    if (!path.empty() && is_image_ext(path) && access(path.c_str(), R_OK) == 0)
-        return path;
-
-    // MIME-type icon
     std::string mime = ext_to_mime(path);
-    std::string icon_name = mime_to_icon(mime);
-    return find_icon_named(icon_name);
+    static std::string last_missing_mime;
+    for (auto& name : mime_to_icon_names(mime)) {
+        std::string found = find_icon_named(name);
+        if (!found.empty()) return found;
+    }
+    if (mime != last_missing_mime) {
+        fprintf(stderr, "[icon] no theme icon for %s (mime=%s), using fallback tile\n",
+                path.empty() ? "?" : path.c_str(), mime.c_str());
+        last_missing_mime = mime;
+    }
+    return {};
 }
 
 // ── Renderer lifecycle ───────────────────────────────────────────────────
