@@ -3,33 +3,121 @@
 #include "renderer.hpp"
 #include "theme.hpp"
 
+#include <X11/Xlib.h>
 #include <cstdlib>
+#include <cstring>
 #include <string_view>
 
 namespace dd {
 
-// ── Renderer ─────────────────────────────────────────────────────────────────
+// ── Linux renderer — Xlib drawing ────────────────────────────────────────────
+// Opens a dedicated Display connection for rendering (separate from the event
+// connection in window_linux.cpp).  XID is server-global, so the same window
+// handle is valid from both connections.
 
-Renderer::~Renderer() {}
+struct X11Draw {
+    Display* dpy    = nullptr;
+    ::Window  win    = 0;
+    GC        gcBg   = nullptr;
+    GC        gcFg   = nullptr;
+    GC        gcRed  = nullptr;
+    GC        gcBlue = nullptr;
+};
 
-bool Renderer::init(void* /*view*/, int w, int h) {
+static X11Draw g_xd;
+
+static unsigned long xcolor(Display* dpy, int scr, unsigned r, unsigned g, unsigned b) {
+    XColor c{};
+    c.red   = static_cast<unsigned short>(r << 8);
+    c.green = static_cast<unsigned short>(g << 8);
+    c.blue  = static_cast<unsigned short>(b << 8);
+    c.flags = DoRed | DoGreen | DoBlue;
+    XAllocColor(dpy, DefaultColormap(dpy, scr), &c);
+    return c.pixel;
+}
+
+static GC mkgc(Display* dpy, ::Window win, unsigned r, unsigned g, unsigned b, int scr) {
+    GC gc = XCreateGC(dpy, win, 0, nullptr);
+    XSetForeground(dpy, gc, xcolor(dpy, scr, r, g, b));
+    return gc;
+}
+
+Renderer::~Renderer() {
+    if (g_xd.gcBg)   { XFreeGC(g_xd.dpy, g_xd.gcBg);   g_xd.gcBg   = nullptr; }
+    if (g_xd.gcFg)   { XFreeGC(g_xd.dpy, g_xd.gcFg);   g_xd.gcFg   = nullptr; }
+    if (g_xd.gcRed)  { XFreeGC(g_xd.dpy, g_xd.gcRed);  g_xd.gcRed  = nullptr; }
+    if (g_xd.gcBlue) { XFreeGC(g_xd.dpy, g_xd.gcBlue); g_xd.gcBlue = nullptr; }
+    if (g_xd.dpy)    { XCloseDisplay(g_xd.dpy);         g_xd.dpy    = nullptr; }
+}
+
+bool Renderer::init(void* view, int w, int h) {
     width_  = w;
     height_ = h;
     ok_     = true;
+    if (!view) return true;
+
+    Display* dpy = XOpenDisplay(nullptr);
+    if (!dpy) return true;
+    int scr = DefaultScreen(dpy);
+    auto xid = static_cast<::Window>(reinterpret_cast<uintptr_t>(view));
+
+    g_xd.dpy    = dpy;
+    g_xd.win    = xid;
+    g_xd.gcBg   = mkgc(dpy, xid, 0x1E, 0x1E, 0x2E, scr);  // dark bg
+    g_xd.gcFg   = mkgc(dpy, xid, 0xCD, 0xD6, 0xF4, scr);  // light text
+    g_xd.gcRed  = mkgc(dpy, xid, 0xF3, 0x8B, 0xA8, scr);  // hide button
+    g_xd.gcBlue = mkgc(dpy, xid, 0x89, 0xB4, 0xFA, scr);  // clear button
+
+    XSetWindowBackground(dpy, xid, xcolor(dpy, scr, 0x1E, 0x1E, 0x2E));
+    XClearWindow(dpy, xid);
+    XFlush(dpy);
+
     return true;
 }
 
 void Renderer::shutdown() { ok_ = false; }
 
-void Renderer::render(float /*dt*/) {}
+void Renderer::render(float) {
+    if (!ok_ || !g_xd.dpy) return;
+    Display* dpy = g_xd.dpy;
+    ::Window  win = g_xd.win;
+
+    XFillRectangle(dpy, win, g_xd.gcBg, 0, 0, width_, height_);
+
+    // Buttons: red = hide, blue = clear
+    XFillArc(dpy, win, g_xd.gcRed,  8, 7, 14, 14, 0, 360 * 64);
+    XFillArc(dpy, win, g_xd.gcBlue, 28, 7, 14, 14, 0, 360 * 64);
+
+    // Title
+    const char* title = "DropAndDrag";
+    XDrawString(dpy, win, g_xd.gcFg, 50, 19, title, static_cast<int>(strlen(title)));
+
+    // Divider
+    XDrawLine(dpy, win, g_xd.gcFg, 0, 27, width_, 27);
+
+    const auto& items = *shared_items_;
+    if (items.empty()) {
+        const char* hint = "Drop files here — shake to toggle";
+        XDrawString(dpy, win, g_xd.gcFg, 8, 47, hint, static_cast<int>(strlen(hint)));
+    } else {
+        int y = 44;
+        for (const auto& item : items) {
+            const std::string& nm = item.data.file_name;
+            XDrawString(dpy, win, g_xd.gcFg, 8, y, nm.c_str(), static_cast<int>(nm.size()));
+            y += 18;
+            if (y > height_ - 6) break;
+        }
+    }
+
+    XFlush(dpy);
+}
 
 void Renderer::setItems(const ItemList& items) {
     *shared_items_ = items;
+    if (g_xd.dpy) render(0.0f);
 }
 
-ItemList Renderer::items() const {
-    return *shared_items_;
-}
+ItemList Renderer::items() const { return *shared_items_; }
 
 void Renderer::setClearCallback(std::function<void()> cb) {
     *clearCallback_ = std::move(cb);
@@ -63,7 +151,6 @@ void Theme::detectSystemTheme() {
 }
 
 void Theme::initPalettes() {
-    // Dark palette
     dark_.background        = 0xFF1E1E2E;
     dark_.surface           = 0xFF2A2A3E;
     dark_.surface_hover     = 0xFF3A3A50;
@@ -81,7 +168,6 @@ void Theme::initPalettes() {
     for (int i = 0; i < 8; ++i)
         dark_.tag_colors[i] = 0xFF89B4FA;
 
-    // Light palette
     light_.background       = 0xFFEFF1F5;
     light_.surface          = 0xFFFFFFFF;
     light_.surface_hover    = 0xFFE6E9EF;

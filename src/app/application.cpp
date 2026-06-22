@@ -458,6 +458,33 @@ bool Application::init_ui() {
     // Start with empty shelf (hint text shown by drawShelf when items list is empty).
     renderer_->setItems({});
 
+#if !defined(__APPLE__) && !defined(_WIN32)
+    // Linux: wire paint callback (macOS uses setNeedsDisplay: / drawRect:).
+    native_window_->setPaintCallback([this]() {
+        if (renderer_) renderer_->render(0.0f);
+    });
+    // Linux: button clicks detected by position (red = hide, blue = clear).
+    // Red  circle: x 8-22,  y 7-21
+    // Blue circle: x 28-42, y 7-21
+    native_window_->setMouseDownCallback([this](int mx, int my, MouseButton) {
+        // Red hide button (top-left)
+        if (mx >= 8 && mx <= 22 && my >= 7 && my <= 21) {
+            native_window_->hide();
+            set_shelf_visible(false);
+        }
+        // Blue clear button
+        else if (mx >= 28 && mx <= 42 && my >= 7 && my <= 21) {
+            log_message("INFO", "Shelf cleared");
+            ItemStore::instance().clear();
+            renderer_->setItems({});
+            constexpr int kW = 400, kH = 120;
+            auto b = native_window_->getBounds();
+            native_window_->setBounds(b.x + b.width/2 - kW/2,
+                                      b.y + b.height/2 - kH/2, kW, kH);
+        }
+    });
+#endif
+
     log_message("INFO", "UI ready — shake while dragging to open shelf");
     return true;
 }

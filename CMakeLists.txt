@@ -301,6 +301,8 @@ elseif(WIN32)
         WIN32_EXECUTABLE TRUE
     )
 elseif(UNIX AND NOT APPLE)
+    target_include_directories(DropAndDragUI PRIVATE ${X11_INCLUDE_DIR})
+    target_link_libraries(DropAndDragUI PRIVATE ${X11_LIBRARIES})
     target_include_directories(DropAndDragPlatform PRIVATE ${X11_INCLUDE_DIR})
     target_link_libraries(DropAndDragPlatform PRIVATE
         ${CMAKE_DL_LIBS}

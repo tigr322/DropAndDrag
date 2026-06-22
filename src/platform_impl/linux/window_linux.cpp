@@ -224,6 +224,7 @@ public:
 
     void show() override {
         XMapWindow(display_, window_);
+        XRaiseWindow(display_, window_);
         XFlush(display_);
         visible_ = true;
     }
