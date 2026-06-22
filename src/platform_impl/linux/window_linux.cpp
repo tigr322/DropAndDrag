@@ -549,9 +549,10 @@ private:
         if (path.empty()) return;
         std::string uri = "file://" + path + "\r\n";
 
+        fprintf(stderr, "[drag-out] beginItemDrag idx=%d path=%s\n", idx, path.c_str());
+
         XSetSelectionOwner(display_, xdnd_selection_, window_, CurrentTime);
 
-        // Store the URI as a property on our window in case another app requests it
         auto& ac = AtomCache::instance();
         Atom xa_str = ac.get(display_, "STRING");
         XChangeProperty(display_, window_, text_uri_list_, xa_str, 8,
@@ -566,28 +567,37 @@ private:
         drag_out_grab_   = true;
 
         hide();
+        fprintf(stderr, "[drag-out] shelf hidden, pointer grabbed\n");
     }
 
     void completeItemDrag() {
+        fprintf(stderr, "[drag-out] completeItemDrag at %d,%d\n",
+                drag_out_src_x_, drag_out_src_y_);
+
         if (drag_out_grab_) {
             XUngrabPointer(display_, CurrentTime);
             XFlush(display_);
             drag_out_grab_ = false;
+            fprintf(stderr, "[drag-out] pointer ungrabbed\n");
         }
 
         ::Window target = findXdndWindow(drag_out_src_x_, drag_out_src_y_);
+        fprintf(stderr, "[drag-out] target window=0x%lx\n", (unsigned long)target);
+
         if (target != None) {
             sendXdndDropToTarget(target, drag_out_src_x_, drag_out_src_y_);
             XSync(display_, False);
+            fprintf(stderr, "[drag-out] Xdnd messages sent, waiting for response\n");
 
-            // Wait up to ~500ms for SelectionRequest or XdndFinished
             for (int i = 0; i < 50; ++i) {
                 XEvent ev;
                 if (XCheckTypedWindowEvent(display_, window_, SelectionRequest, &ev)) {
+                    fprintf(stderr, "[drag-out] got SelectionRequest\n");
                     handleSelectionRequestOut(ev);
                 }
                 if (XCheckTypedWindowEvent(display_, window_, ClientMessage, &ev)) {
                     if (static_cast<Atom>(ev.xclient.message_type) == xdnd_finished_) {
+                        fprintf(stderr, "[drag-out] got XdndFinished\n");
                         break;
                     }
                 }
