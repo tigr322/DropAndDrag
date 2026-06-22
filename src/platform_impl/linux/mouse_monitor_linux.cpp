@@ -16,9 +16,11 @@
 #  include <wayland-client.h>
 #  include <poll.h>
 #  include <cstring>
-// Include the protocol implementation in this TU inside extern "C" so the
-// zwp_*_interface symbols get external C linkage per [dcl.link]/6.
-// This avoids C++ const-internal-linkage issues across archive boundaries.
+// Header provides C++ type declarations (struct/typedef) for the protocol types.
+#  include "relative-pointer-unstable-v1.h"
+// Implementation inside extern "C": gives zwp_*_interface external C linkage
+// per [dcl.link]/6 so LTO can resolve the symbols within this TU.
+// The .c's own #include of the header is a no-op due to the include guard.
 extern "C" {
 #  include "relative-pointer-unstable-v1.c"
 }
