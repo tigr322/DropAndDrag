@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.25)
-project(DropAndDrag VERSION 1.0.12 LANGUAGES CXX OBJCXX)
+project(DropAndDrag VERSION 1.0.12 LANGUAGES CXX OBJCXX C)
 
 configure_file(src/version.hpp.in ${CMAKE_CURRENT_BINARY_DIR}/version.hpp @ONLY)
 
@@ -160,11 +160,6 @@ else()
                     COMMAND "${WAYLAND_SCANNER}" public-code  "${_RP_XML}"
                             "${_WL_GEN}/relative-pointer-unstable-v1.c"
                     DEPENDS "${_RP_XML}" VERBATIM
-                )
-                # Compile as C++ — project has no C compiler enabled.
-                set_source_files_properties(
-                    "${_WL_GEN}/relative-pointer-unstable-v1.c"
-                    PROPERTIES LANGUAGE CXX
                 )
                 add_library(WaylandRelPtr STATIC "${_WL_GEN}/relative-pointer-unstable-v1.c")
                 target_include_directories(WaylandRelPtr PUBLIC "${_WL_GEN}" ${WAYLAND_CLIENT_INCLUDE_DIRS})
