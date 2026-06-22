@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.25)
-project(DropAndDrag VERSION 1.0.12 LANGUAGES CXX OBJCXX C)
+project(DropAndDrag VERSION 1.0.12 LANGUAGES CXX OBJCXX)
 
 configure_file(src/version.hpp.in ${CMAKE_CURRENT_BINARY_DIR}/version.hpp @ONLY)
 
@@ -161,9 +161,14 @@ else()
                             "${_WL_GEN}/relative-pointer-unstable-v1.c"
                     DEPENDS "${_RP_XML}" VERBATIM
                 )
-                add_library(WaylandRelPtr STATIC "${_WL_GEN}/relative-pointer-unstable-v1.c")
-                target_include_directories(WaylandRelPtr PUBLIC "${_WL_GEN}" ${WAYLAND_CLIENT_INCLUDE_DIRS})
-                target_link_libraries(WaylandRelPtr PUBLIC ${WAYLAND_CLIENT_LIBRARIES})
+                # Generate into a custom target so DropAndDragPlatform can declare a
+                # build-order dependency without compiling the .c directly.
+                # mouse_monitor_linux.cpp includes the .c inside extern "C" {} so the
+                # zwp_*_interface symbols get C linkage (external by default in C) within
+                # the same translation unit — bypassing C++ const-internal-linkage limits.
+                add_custom_target(wayland_relptr_gen ALL
+                    DEPENDS "${_WL_GEN}/relative-pointer-unstable-v1.h"
+                            "${_WL_GEN}/relative-pointer-unstable-v1.c")
                 set(HAVE_WAYLAND_RELPTR ON)
                 message(STATUS "Wayland relative pointer enabled — global tracking including Wayland-native windows")
             else()
@@ -309,7 +314,8 @@ elseif(UNIX AND NOT APPLE)
     if(HAVE_WAYLAND_RELPTR)
         target_compile_definitions(DropAndDragPlatform PRIVATE HAVE_WL_RELATIVE_POINTER=1)
         target_include_directories(DropAndDragPlatform PRIVATE "${_WL_GEN}" ${WAYLAND_CLIENT_INCLUDE_DIRS})
-        target_link_libraries(DropAndDragPlatform PRIVATE WaylandRelPtr)
+        target_link_libraries(DropAndDragPlatform PRIVATE ${WAYLAND_CLIENT_LIBRARIES})
+        add_dependencies(DropAndDragPlatform wayland_relptr_gen)
     endif()
     target_link_libraries(DropAndDrag PRIVATE
         ${CMAKE_DL_LIBS}

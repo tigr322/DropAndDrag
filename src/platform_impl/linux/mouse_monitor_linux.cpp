@@ -16,7 +16,12 @@
 #  include <wayland-client.h>
 #  include <poll.h>
 #  include <cstring>
-#  include "relative-pointer-unstable-v1.h"
+// Include the protocol implementation in this TU inside extern "C" so the
+// zwp_*_interface symbols get external C linkage per [dcl.link]/6.
+// This avoids C++ const-internal-linkage issues across archive boundaries.
+extern "C" {
+#  include "relative-pointer-unstable-v1.c"
+}
 #endif
 
 #if defined(HAVE_XRECORD) || defined(HAVE_WL_RELATIVE_POINTER)
