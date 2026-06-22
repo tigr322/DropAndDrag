@@ -102,7 +102,7 @@ void Renderer::render(float) {
     } else {
         int y = 44;
         for (const auto& item : items) {
-            const std::string& nm = item.data.file_name;
+            const std::string nm = item.data.file_name.value_or(item.data.path.value_or("?"));
             XDrawString(dpy, win, g_xd.gcFg, 8, y, nm.c_str(), static_cast<int>(nm.size()));
             y += 18;
             if (y > height_ - 6) break;
