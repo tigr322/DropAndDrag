@@ -161,8 +161,12 @@ else()
                             "${_WL_GEN}/relative-pointer-unstable-v1.c"
                     DEPENDS "${_RP_XML}" VERBATIM
                 )
+                # Compile as C++ — project has no C compiler enabled.
+                set_source_files_properties(
+                    "${_WL_GEN}/relative-pointer-unstable-v1.c"
+                    PROPERTIES LANGUAGE CXX
+                )
                 add_library(WaylandRelPtr STATIC "${_WL_GEN}/relative-pointer-unstable-v1.c")
-                set_target_properties(WaylandRelPtr PROPERTIES LINKER_LANGUAGE C)
                 target_include_directories(WaylandRelPtr PUBLIC "${_WL_GEN}" ${WAYLAND_CLIENT_INCLUDE_DIRS})
                 target_link_libraries(WaylandRelPtr PUBLIC ${WAYLAND_CLIENT_LIBRARIES})
                 set(HAVE_WAYLAND_RELPTR ON)
