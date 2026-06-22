@@ -41,11 +41,13 @@ bool is_mouse_monitor_running();
 void set_shelf_visible(bool visible);
 
 #if defined(__linux__)
-// Feed the current absolute screen cursor position and button state into the
-// shake detector.  Called each main-loop tick from Application::run_linux_loop
-// so the window's X connection drives detection.
-// button_down should be the real pointer button state from XQueryPointer.
-void tick_mouse_monitor(int x, int y, bool button_down);
+// Feed the current absolute screen cursor position (XQueryPointer fallback) into
+// the shake detector.  Called each main-loop tick from Application::run_linux_loop.
+// XRecord (if available) provides better tracking in a background thread; the
+// fallback coordinates are used only when neither XRecord nor /dev/input/mice yield
+// events.  Button-state is always forced to true on Linux — XWayland cannot reliably
+// report it for Wayland-native drag sources.
+void tick_mouse_monitor(int fallback_x, int fallback_y);
 #endif
 
 } // namespace dd

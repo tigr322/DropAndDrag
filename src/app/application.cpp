@@ -564,15 +564,12 @@ int Application::run_linux_loop() {
     while (running_.load(std::memory_order_acquire)) {
         if (native_window_) native_window_->processEvents();
 
-        // Feed cursor position + button state into the shake detector.
-        // Uses the window's own X connection for accurate coordinates.
+        // Feed XQueryPointer position as fallback into the shake detector.
+        // XRecord (if compiled in) provides primary tracking in a background thread.
         if (native_window_ && shake_detector_) {
-            int px, py;
-            bool btn = false;
-            if (native_window_->getScreenPointerPos(px, py, &btn))
-                tick_mouse_monitor(px, py, btn);
-            else
-                tick_mouse_monitor(0, 0, false);
+            int px = 0, py = 0;
+            native_window_->getScreenPointerPos(px, py);
+            tick_mouse_monitor(px, py);
         }
 
         std::this_thread::sleep_for(std::chrono::milliseconds(4));

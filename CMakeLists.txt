@@ -133,6 +133,47 @@ else()
     if(NOT X11_Xi_FOUND)
         message(FATAL_ERROR "XInput2 not found — install with: sudo apt install libxi-dev")
     endif()
+    if(X11_Xtst_FOUND)
+        message(STATUS "libXtst found — XRecord global mouse tracking enabled")
+    else()
+        message(STATUS "libXtst not found — install libxtst-dev for XRecord mouse tracking")
+    endif()
+
+    # zwp_relative_pointer_manager_v1: delivers relative motion to ALL registered
+    # clients regardless of surface focus — works even when cursor is over Nautilus.
+    find_package(PkgConfig QUIET)
+    if(PkgConfig_FOUND)
+        pkg_check_modules(WAYLAND_CLIENT QUIET wayland-client)
+        pkg_check_modules(WAYLAND_PROTOCOLS QUIET wayland-protocols)
+        find_program(WAYLAND_SCANNER NAMES wayland-scanner QUIET)
+        if(WAYLAND_CLIENT_FOUND AND WAYLAND_PROTOCOLS_FOUND AND WAYLAND_SCANNER)
+            pkg_get_variable(WL_PROTO_DIR wayland-protocols pkgdatadir)
+            set(_RP_XML "${WL_PROTO_DIR}/unstable/relative-pointer/relative-pointer-unstable-v1.xml")
+            if(EXISTS "${_RP_XML}")
+                set(_WL_GEN "${CMAKE_CURRENT_BINARY_DIR}/wayland-gen")
+                file(MAKE_DIRECTORY "${_WL_GEN}")
+                add_custom_command(
+                    OUTPUT  "${_WL_GEN}/relative-pointer-unstable-v1.h"
+                            "${_WL_GEN}/relative-pointer-unstable-v1.c"
+                    COMMAND "${WAYLAND_SCANNER}" client-header "${_RP_XML}"
+                            "${_WL_GEN}/relative-pointer-unstable-v1.h"
+                    COMMAND "${WAYLAND_SCANNER}" private-code  "${_RP_XML}"
+                            "${_WL_GEN}/relative-pointer-unstable-v1.c"
+                    DEPENDS "${_RP_XML}" VERBATIM
+                )
+                add_library(WaylandRelPtr STATIC "${_WL_GEN}/relative-pointer-unstable-v1.c")
+                target_include_directories(WaylandRelPtr PUBLIC "${_WL_GEN}" ${WAYLAND_CLIENT_INCLUDE_DIRS})
+                target_link_libraries(WaylandRelPtr PUBLIC ${WAYLAND_CLIENT_LIBRARIES})
+                set(HAVE_WAYLAND_RELPTR ON)
+                message(STATUS "Wayland relative pointer enabled — global tracking including Wayland-native windows")
+            else()
+                message(STATUS "Wayland relative-pointer XML not found; install wayland-protocols")
+            endif()
+        else()
+            message(STATUS "Wayland relative pointer unavailable")
+            message(STATUS "  Install: sudo apt install libwayland-dev wayland-protocols libwayland-bin")
+        endif()
+    endif()
 endif()
 if(APPLE)
     file(GLOB_RECURSE UI_SOURCES CONFIGURE_DEPENDS
@@ -260,11 +301,21 @@ elseif(UNIX AND NOT APPLE)
         ${CMAKE_DL_LIBS}
         ${X11_LIBRARIES}
         ${X11_Xi_LIB}
+        $<$<BOOL:${X11_Xtst_FOUND}>:${X11_Xtst_LIB}>
     )
+    if(X11_Xtst_FOUND)
+        target_compile_definitions(DropAndDragPlatform PRIVATE HAVE_XRECORD=1)
+    endif()
+    if(HAVE_WAYLAND_RELPTR)
+        target_compile_definitions(DropAndDragPlatform PRIVATE HAVE_WL_RELATIVE_POINTER=1)
+        target_include_directories(DropAndDragPlatform PRIVATE "${_WL_GEN}" ${WAYLAND_CLIENT_INCLUDE_DIRS})
+        target_link_libraries(DropAndDragPlatform PRIVATE WaylandRelPtr)
+    endif()
     target_link_libraries(DropAndDrag PRIVATE
         ${CMAKE_DL_LIBS}
         ${X11_LIBRARIES}
         ${X11_Xi_LIB}
+        $<$<BOOL:${X11_Xtst_FOUND}>:${X11_Xtst_LIB}>
     )
     if(OPENGL_FOUND)
         target_link_libraries(DropAndDrag PRIVATE OpenGL::GL)
