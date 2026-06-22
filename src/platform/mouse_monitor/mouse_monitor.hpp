@@ -41,10 +41,11 @@ bool is_mouse_monitor_running();
 void set_shelf_visible(bool visible);
 
 #if defined(__linux__)
-// Feed the current absolute screen cursor position into the shake detector.
-// Called each main-loop tick from Application::run_linux_loop so the
-// window's X connection (not a stale separate one) drives detection.
-void tick_mouse_monitor(int x, int y);
+// Feed the current absolute screen cursor position and button state into the
+// shake detector.  Called each main-loop tick from Application::run_linux_loop
+// so the window's X connection drives detection.
+// button_down should be the real pointer button state from XQueryPointer.
+void tick_mouse_monitor(int x, int y, bool button_down);
 #endif
 
 } // namespace dd

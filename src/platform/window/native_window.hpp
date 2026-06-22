@@ -107,9 +107,10 @@ public:
     // Pump pending platform events. Called each tick on Linux; no-op elsewhere.
     virtual void processEvents() {}
 
-    // Return current screen-relative cursor position.  Returns false if
-    // the platform cannot determine it.  Default is a no-op.
-    virtual bool getScreenPointerPos(int& x, int& y) const noexcept {
+    // Return current screen-relative cursor position and button state.
+    // Returns false if the platform cannot determine it.  Default is a no-op.
+    // button_down reports whether any mouse button is held (Button1-3 on X11).
+    virtual bool getScreenPointerPos(int& x, int& y, bool* button_down = nullptr) const noexcept {
         x = 0; y = 0; return false;
     }
 

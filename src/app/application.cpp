@@ -564,13 +564,15 @@ int Application::run_linux_loop() {
     while (running_.load(std::memory_order_acquire)) {
         if (native_window_) native_window_->processEvents();
 
-        // Feed cursor position from the window's own X connection into the
-        // shake detector.  A separate X connection gets stale positions on
-        // XWayland; using display_ here keeps it accurate.
+        // Feed cursor position + button state into the shake detector.
+        // Uses the window's own X connection for accurate coordinates.
         if (native_window_ && shake_detector_) {
             int px, py;
-            if (native_window_->getScreenPointerPos(px, py))
-                tick_mouse_monitor(px, py);
+            bool btn = false;
+            if (native_window_->getScreenPointerPos(px, py, &btn))
+                tick_mouse_monitor(px, py, btn);
+            else
+                tick_mouse_monitor(0, 0, false);
         }
 
         std::this_thread::sleep_for(std::chrono::milliseconds(4));

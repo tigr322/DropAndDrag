@@ -21,17 +21,18 @@ int                 g_virt_y    = 0;
 
 bool start_mouse_monitor(MouseShakeDetector& detector) {
     g_detector = &detector;
-    g_detector->set_mouse_button_down(true);
 
-    // /dev/input/mice aggregates all pointing devices and works on both
-    // native X11 and Wayland sessions (XQueryPointer is stale on XWayland).
+    // Primary source: /dev/input/mice aggregates all pointing devices.
+    // Works on native X11 and some XWayland setups; may be empty on evdev-only
+    // systems.  If open fails or produces no events, tick falls back to the
+    // absolute coordinates passed by the event loop (XQueryPointer).
     g_mouse_fd = open("/dev/input/mice", O_RDONLY | O_NONBLOCK);
     if (g_mouse_fd < 0) {
         fprintf(stderr,
             "[shake] Cannot open /dev/input/mice (errno=%d).\n"
-            "  Fix: sudo usermod -aG input $USER  then log out and back in.\n",
+            "  Fix: sudo usermod -aG input $USER  then log out and back in.\n"
+            "  (using XQueryPointer fallback until then)\n",
             errno);
-        // Return true anyway — tick will use XQueryPointer fallback.
     }
 
     g_running.store(true, std::memory_order_release);
@@ -53,18 +54,16 @@ bool is_mouse_monitor_running() {
 
 void set_shelf_visible(bool visible) {
     if (!visible && g_detector) {
-        // Reset accumulated shake state so the next gesture starts clean,
-        // then re-enable immediately (button always stays "held" on Linux).
         g_detector->set_mouse_button_down(false);
-        g_detector->set_mouse_button_down(true);
     }
 }
 
-void tick_mouse_monitor(int fallback_x, int fallback_y) {
+void tick_mouse_monitor(int fallback_x, int fallback_y, bool button_down) {
     if (!g_detector || !g_running.load(std::memory_order_acquire)) return;
 
+    g_detector->set_mouse_button_down(button_down);
+
     if (g_mouse_fd >= 0) {
-        // PS/2 packet: [buttons, rel_x, rel_y] — 3 bytes, signed rel deltas.
         unsigned char pkt[3];
         bool got_any = false;
         while (true) {
@@ -72,13 +71,13 @@ void tick_mouse_monitor(int fallback_x, int fallback_y) {
             if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) break;
             if (n != 3) break;
             g_virt_x += (signed char)pkt[1];
-            g_virt_y -= (signed char)pkt[2]; // Y inverted in PS/2
+            g_virt_y -= (signed char)pkt[2];
             got_any = true;
             g_detector->on_mouse_move(g_virt_x, g_virt_y);
         }
-        (void)got_any;
+        if (!got_any)
+            g_detector->on_mouse_move(fallback_x, fallback_y);
     } else {
-        // Fallback to XQueryPointer (works on native X11, stale on XWayland).
         g_detector->on_mouse_move(fallback_x, fallback_y);
     }
 }

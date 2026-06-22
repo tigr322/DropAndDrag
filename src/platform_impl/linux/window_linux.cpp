@@ -365,12 +365,16 @@ public:
         }
     }
 
-    bool getScreenPointerPos(int& x, int& y) const noexcept override {
+    bool getScreenPointerPos(int& x, int& y, bool* button_down = nullptr) const noexcept override {
         Window root_ret, child_ret;
         int wx, wy;
         unsigned int state;
-        return XQueryPointer(display_, root_, &root_ret, &child_ret,
-                             &x, &y, &wx, &wy, &state) != 0;
+        if (!XQueryPointer(display_, root_, &root_ret, &child_ret,
+                           &x, &y, &wx, &wy, &state))
+            return false;
+        if (button_down)
+            *button_down = (state & (Button1Mask | Button2Mask | Button3Mask)) != 0;
+        return true;
     }
 
 private:
