@@ -157,7 +157,7 @@ else()
                             "${_WL_GEN}/relative-pointer-unstable-v1.c"
                     COMMAND "${WAYLAND_SCANNER}" client-header "${_RP_XML}"
                             "${_WL_GEN}/relative-pointer-unstable-v1.h"
-                    COMMAND "${WAYLAND_SCANNER}" private-code  "${_RP_XML}"
+                    COMMAND "${WAYLAND_SCANNER}" public-code  "${_RP_XML}"
                             "${_WL_GEN}/relative-pointer-unstable-v1.c"
                     DEPENDS "${_RP_XML}" VERBATIM
                 )
