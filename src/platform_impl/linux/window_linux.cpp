@@ -566,6 +566,7 @@ private:
         drag_out_active_ = true;
         drag_out_grab_   = true;
 
+        set_drag_out_active(true);
         hide();
         fprintf(stderr, "[drag-out] shelf hidden, pointer grabbed\n");
     }
@@ -609,56 +610,77 @@ private:
         drag_out_active_   = false;
         drag_out_item_idx_ = -1;
 
+        set_drag_out_active(false);
         show();
     }
 
     ::Window findXdndWindow(int root_x, int root_y) {
-        ::Window child = root_;
-        ::Window result = None;
-        int abs_x = 0, abs_y = 0;
-        while (true) {
-            ::Window root_ret, parent_ret;
-            ::Window* children = nullptr;
-            unsigned int nchildren = 0;
-            if (!XQueryTree(display_, child, &root_ret, &parent_ret,
-                           &children, &nchildren) || !children || nchildren == 0) {
-                result = child;
-                break;
-            }
-            bool found_child = false;
-            for (unsigned int i = 0; i < nchildren; ++i) {
-                ::Window w = children[i];
-                XWindowAttributes wa;
-                if (!XGetWindowAttributes(display_, w, &wa)) continue;
-                if (wa.map_state != IsViewable) continue;
-                int w_abs_x = abs_x + wa.x;
-                int w_abs_y = abs_y + wa.y;
-                if (root_x >= w_abs_x && root_x < w_abs_x + wa.width &&
-                    root_y >= w_abs_y && root_y < w_abs_y + wa.height) {
-                    result = w;
-                    child  = w;
-                    abs_x = w_abs_x;
-                    abs_y = w_abs_y;
-                    found_child = true;
-                    break;
+        // Scan all top-level children of root, find which one contains the point,
+        // then check if it's XdndAware.  Using XTranslateCoordinates is more
+        // reliable than recursive-tree-walk because on XWayland, window
+        // positions from XGetWindowAttributes may be virtual.
+        ::Window root_ret, parent_ret;
+        ::Window* children = nullptr;
+        unsigned int n = 0;
+        if (!XQueryTree(display_, root_, &root_ret, &parent_ret, &children, &n) || !children)
+            return None;
+
+        ::Window best = None;
+        for (int i = static_cast<int>(n) - 1; i >= 0; --i) {
+            ::Window w = children[i];
+            XWindowAttributes wa;
+            if (!XGetWindowAttributes(display_, w, &wa)) continue;
+            if (wa.map_state != IsViewable) continue;
+
+            // Translate root coords → this window's coords
+            ::Window child_ret;
+            int wx, wy;
+            if (!XTranslateCoordinates(display_, root_, w, root_x, root_y,
+                                       &wx, &wy, &child_ret))
+                continue;
+
+            if (wx >= 0 && wx < wa.width && wy >= 0 && wy < wa.height) {
+                auto& ac = AtomCache::instance();
+                Atom xa = ac.get(display_, "XdndAware");
+                Atom actual; int fmt; unsigned long nitems, ba;
+                unsigned char* d = nullptr;
+                if (XGetWindowProperty(display_, w, xa, 0, 1, False, XA_ATOM,
+                                       &actual, &fmt, &nitems, &ba, &d) == Success && d) {
+                    XFree(d);
+                    // Found an XDnD-aware window.  Try to find a deeper child
+                    // that also accepts drops (e.g. file-view inside file-manager).
+                    ::Window* sub = nullptr;
+                    unsigned int sn = 0;
+                    if (XQueryTree(display_, w, &root_ret, &parent_ret, &sub, &sn) && sub && sn > 0) {
+                        for (unsigned int j = 0; j < sn; ++j) {
+                            XWindowAttributes swa;
+                            if (!XGetWindowAttributes(display_, sub[j], &swa)) continue;
+                            if (swa.map_state != IsViewable) continue;
+                            int swx, swy;
+                            if (!XTranslateCoordinates(display_, root_, sub[j],
+                                                       root_x, root_y, &swx, &swy, &child_ret))
+                                continue;
+                            unsigned char* sd = nullptr;
+                            if (swx >= 0 && swx < swa.width && swy >= 0 && swy < swa.height &&
+                                XGetWindowProperty(display_, sub[j], xa, 0, 1, False, XA_ATOM,
+                                                   &actual, &fmt, &nitems, &ba, &sd) == Success && sd) {
+                                XFree(sd);
+                                XFree(sub);
+                                XFree(children);
+                                return sub[j];
+                            }
+                            if (sd) XFree(sd);
+                        }
+                        XFree(sub);
+                    }
+                    XFree(children);
+                    return w;
                 }
-            }
-            XFree(children);
-            if (!found_child) break;
-        }
-        if (result != None) {
-            auto& ac = AtomCache::instance();
-            Atom xa = ac.get(display_, "XdndAware");
-            Atom actual; int fmt; unsigned long n, ba;
-            unsigned char* d = nullptr;
-            if (XGetWindowProperty(display_, result, xa, 0, 1, False, XA_ATOM,
-                                   &actual, &fmt, &n, &ba, &d) == Success && d) {
-                XFree(d);
-            } else {
-                result = None;
+                if (d) XFree(d);
             }
         }
-        return result;
+        XFree(children);
+        return None;
     }
 
     void sendXdndDropToTarget(::Window target, int x, int y) {

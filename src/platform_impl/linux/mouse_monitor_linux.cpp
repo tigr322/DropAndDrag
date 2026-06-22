@@ -35,6 +35,7 @@ namespace {
 
 MouseShakeDetector* g_detector = nullptr;
 std::atomic<bool>   g_running{false};
+std::atomic<bool>   g_drag_out_active{false};
 int                 g_mouse_fd = -1;
 int                 g_virt_x   = 0;
 int                 g_virt_y   = 0;
@@ -255,8 +256,13 @@ void set_shelf_visible(bool visible) {
         g_detector->set_mouse_button_down(false);
 }
 
+void set_drag_out_active(bool active) {
+    g_drag_out_active.store(active, std::memory_order_release);
+}
+
 void tick_mouse_monitor(int fallback_x, int fallback_y) {
     if (!g_detector || !g_running.load(std::memory_order_acquire)) return;
+    if (g_drag_out_active.load(std::memory_order_acquire)) return;
 
     // Button state is always "held" on Linux.  XQueryPointer returns stale state
     // on XWayland (releases over Wayland-native surfaces are not propagated back

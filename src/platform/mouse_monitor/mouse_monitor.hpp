@@ -48,6 +48,10 @@ void set_shelf_visible(bool visible);
 // Instead the detector always treats the button as held and relies on tight
 // thresholds (set in Application::init_mouse_shake) to prevent false triggers.
 void tick_mouse_monitor(int fallback_x, int fallback_y);
+
+// Block/unblock shake detection during drag-out from the shelf.
+// Call with true in beginItemDrag, false in completeItemDrag.
+void set_drag_out_active(bool active);
 #endif
 
 } // namespace dd
